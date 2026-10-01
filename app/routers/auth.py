@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Response, Request, Depends
 from app.database import get_db
-from app.models import PhoneLoginRequest, DemoLoginRequest
+from app.models import PhoneLoginRequest, DemoLoginRequest, TelegramAuthRequest
 from app.auth import create_session, delete_session, get_current_user, get_current_user_optional
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -75,6 +75,54 @@ def login_phone(req: PhoneLoginRequest, response: Response):
             INSERT INTO users (phone, full_name, role, telegram_username)
             VALUES (?, ?, 'student', ?)
         """, (phone, full_name, tg))
+        conn.commit()
+        user_id = cursor.lastrowid
+        cursor.execute("SELECT id, phone, full_name, role, telegram_username, is_blocked FROM users WHERE id = ?", (user_id,))
+        user = cursor.fetchone()
+
+    conn.close()
+
+    token = create_session(user["id"])
+    response.set_cookie(
+        key="session_token",
+        value=token,
+        httponly=True,
+        max_age=86400 * 30,
+        samesite="lax"
+    )
+
+    return {
+        "status": "ok",
+        "token": token,
+        "user": dict(user)
+    }
+
+@router.post("/telegram-webapp")
+def telegram_webapp_auth(req: TelegramAuthRequest, response: Response):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    username = f"@{req.username.lstrip('@')}" if req.username else None
+    phone_fallback = f"+tg_{req.id}"
+
+    user = None
+    # 1. Try matching by telegram_username if provided
+    if username:
+        cursor.execute("SELECT id, phone, full_name, role, telegram_username, is_blocked FROM users WHERE LOWER(telegram_username) = LOWER(?)", (username,))
+        user = cursor.fetchone()
+
+    # 2. Try matching by phone fallback
+    if not user:
+        cursor.execute("SELECT id, phone, full_name, role, telegram_username, is_blocked FROM users WHERE phone = ?", (phone_fallback,))
+        user = cursor.fetchone()
+
+    # 3. If not found, register new student
+    if not user:
+        full_name = f"{req.first_name} {req.last_name or ''}".strip() or f"Ученик {req.id}"
+        cursor.execute("""
+            INSERT INTO users (phone, full_name, role, telegram_username)
+            VALUES (?, ?, 'student', ?)
+        """, (phone_fallback, full_name, username))
         conn.commit()
         user_id = cursor.lastrowid
         cursor.execute("SELECT id, phone, full_name, role, telegram_username, is_blocked FROM users WHERE id = ?", (user_id,))

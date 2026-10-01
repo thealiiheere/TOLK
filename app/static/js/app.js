@@ -8,21 +8,58 @@ const State = {
 
 // Initialize app on DOM ready
 document.addEventListener('DOMContentLoaded', async () => {
-    initTelegramWebApp();
+    await initTelegramWebApp();
     await loadDemoUsers();
     await checkAuth();
     setupGlobalEvents();
 });
 
-// Telegram WebApp helper
-function initTelegramWebApp() {
+// Telegram WebApp helper & Haptic Feedback
+function tgHaptic(type = 'light') {
+    if (window.Telegram?.WebApp?.HapticFeedback) {
+        if (type === 'success' || type === 'error' || type === 'warning') {
+            window.Telegram.WebApp.HapticFeedback.notificationOccurred(type);
+        } else {
+            window.Telegram.WebApp.HapticFeedback.impactOccurred(type);
+        }
+    }
+}
+
+async function initTelegramWebApp() {
     if (window.Telegram && window.Telegram.WebApp) {
+        const tg = window.Telegram.WebApp;
         try {
-            window.Telegram.WebApp.ready();
-            window.Telegram.WebApp.expand();
+            tg.ready();
+            tg.expand();
+            if (tg.setHeaderColor) tg.setHeaderColor('#FFFFFF');
+            if (tg.setBackgroundColor) tg.setBackgroundColor('#F8F9FA');
+            if (tg.enableClosingConfirmation) tg.enableClosingConfirmation();
+
+            // Auto-login if opened inside Telegram and user data is available
+            const tgUser = tg.initDataUnsafe?.user;
+            if (tgUser && !State.token) {
+                console.log("Authenticating Telegram User:", tgUser);
+                const res = await fetch('/api/auth/telegram-webapp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: tgUser.id,
+                        first_name: tgUser.first_name || '',
+                        last_name: tgUser.last_name || '',
+                        username: tgUser.username || null
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.token) {
+                    State.token = data.token;
+                    State.user = data.user;
+                    localStorage.setItem('tolk_token', data.token);
+                    tgHaptic('success');
+                }
+            }
             console.log("Telegram WebApp initialized successfully");
         } catch (e) {
-            console.log("Not in Telegram WebApp context", e);
+            console.log("Telegram WebApp context notice:", e);
         }
     }
 }

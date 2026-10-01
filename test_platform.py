@@ -77,6 +77,32 @@ def test_auth_and_rbac_isolation():
     assert dash["group"]["strikes"] == 0
     assert dash["group"]["is_access_revoked"] is False
 
+def test_telegram_webapp_auth():
+    # 1. Existing user by telegram username (@sardor_a)
+    res = client.post("/api/auth/telegram-webapp", json={
+        "id": 9991234,
+        "first_name": "Sardor",
+        "last_name": "Aliev",
+        "username": "sardor_a"
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert data["user"]["full_name"] == "Сардор Алиев"
+    assert data["user"]["role"] == "student"
+
+    # 2. New user from Telegram
+    res_new = client.post("/api/auth/telegram-webapp", json={
+        "id": 8887776,
+        "first_name": "Новый",
+        "last_name": "Телеграмщик",
+        "username": "new_tg_user"
+    })
+    assert res_new.status_code == 200
+    data_new = res_new.json()
+    assert data_new["user"]["full_name"] == "Новый Телеграмщик"
+    assert data_new["user"]["role"] == "student"
+
 def test_student_homework_submission():
     # Login as student (Sardor Aliev, id 4)
     login_res = client.post("/api/auth/demo-login", json={"user_id": 4})
@@ -222,6 +248,7 @@ if __name__ == "__main__":
     test_public_payment_submission()
     test_demo_users_list()
     test_auth_and_rbac_isolation()
+    test_telegram_webapp_auth()
     test_student_homework_submission()
     test_student_3_strikes_blocked()
     test_tutor_cabinet_and_lesson_journal()

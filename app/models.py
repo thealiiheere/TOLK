@@ -6,6 +6,12 @@ class PhoneLoginRequest(BaseModel):
     full_name: Optional[str] = None
     telegram_username: Optional[str] = None
 
+class TelegramAuthRequest(BaseModel):
+    id: int
+    first_name: Optional[str] = ""
+    last_name: Optional[str] = ""
+    username: Optional[str] = None
+
 class DemoLoginRequest(BaseModel):
     user_id: int
 
