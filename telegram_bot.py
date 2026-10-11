@@ -1,136 +1,99 @@
-"""
-TOLK Telegram Bot Launcher (Zero external dependencies).
-This script provides a Telegram Bot that launches the TOLK WebApp directly inside Telegram.
+"""TOLK Telegram bot: opens the Mini App. Runs as its own process (long polling, no inbound ports needed).
 
-Usage:
-1. Create a bot in Telegram via @BotFather (send /newbot) and copy your BOT_TOKEN.
-2. Run ngrok to get an HTTPS URL:
-     ngrok http 8000
-   Copy the https URL (e.g., https://xxxx.ngrok-free.app).
-3. Run this script:
-     python telegram_bot.py
-   or set environment variables:
-     set TELEGRAM_BOT_TOKEN=your_token_here
-     set TOLK_WEBAPP_URL=https://your-ngrok-url.ngrok-free.app
-     python telegram_bot.py
-"""
+    python telegram_bot.py
 
-import os
+Needs TELEGRAM_BOT_TOKEN and TOLK_WEBAPP_URL (your public https domain) in .env.
+Notifications (payments, lessons, ratings) are sent by the web app itself via app/notify.py.
+"""
+import html
+import logging
 import sys
-import json
 import time
-import urllib.request
-import urllib.parse
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-WEBAPP_URL = os.environ.get("TOLK_WEBAPP_URL", "").strip()
+import httpx
+from sqlalchemy import select
 
-def telegram_api(method, data=None):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
-    headers = {"Content-Type": "application/json"}
-    body = json.dumps(data).encode("utf-8") if data else None
-    req = urllib.request.Request(url, data=body, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception as e:
-        print(f"[ERROR] Telegram API request failed ({method}): {e}")
-        return None
+from app.config import settings
+from app.database import SessionLocal
+from app.i18n import normalize_lang, t
+from app.models import User
 
-def setup_menu_button():
-    """Configures the persistent WebApp Menu Button in the chat"""
-    res = telegram_api("setChatMenuButton", {
-        "menu_button": {
-            "type": "web_app",
-            "text": "Открыть TOLK",
-            "web_app": {"url": WEBAPP_URL}
-        }
-    })
-    if res and res.get("ok"):
-        print("[OK] WebApp Menu Button configured successfully in Telegram!")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s bot: %(message)s")
+log = logging.getLogger("tolk.bot")
 
-def send_welcome(chat_id, user_first_name=""):
-    text = (
-        f"Привет, {user_first_name}! 👋\n\n"
-        "Добро пожаловать в **TOLK** — платформу разговорной практики языков в микро-группах (до 5 человек) со студентами-тьюторами по методике **«Tengdosh tengdoshga»**.\n\n"
-        "Нажмите на кнопку ниже, чтобы открыть платформу прямо внутри Telegram 👇"
+API = f"https://api.telegram.org/bot{settings.telegram_bot_token}"
+COMMANDS = {
+    "uz": [("start", "TOLK ni ochish")],
+    "ru": [("start", "Открыть TOLK")],
+    "en": [("start", "Open TOLK")],
+}
+
+
+def call(client: httpx.Client, method: str, **payload):
+    resp = client.post(f"{API}/{method}", json=payload, timeout=40)
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"{method} failed: {data.get('description')}")
+    return data["result"]
+
+
+def user_lang(tg_user: dict) -> str:
+    with SessionLocal() as db:
+        saved = db.scalar(select(User.lang).where(User.telegram_id == tg_user.get("id")))
+    return saved or normalize_lang(tg_user.get("language_code"))
+
+
+def send_welcome(client: httpx.Client, chat_id: int, tg_user: dict) -> None:
+    lang = user_lang(tg_user)
+    name = tg_user.get("first_name") or "👋"
+    call(
+        client, "sendMessage",
+        chat_id=chat_id,
+        text=t("bot_welcome", lang, name=html.escape(name)),
+        parse_mode="HTML",
+        reply_markup={"inline_keyboard": [[{"text": "🎓 " + t("open_app", lang), "web_app": {"url": settings.tolk_webapp_url}}]]},
     )
 
-    keyboard = {
-        "inline_keyboard": [
-            [
-                {
-                    "text": "🚀 Открыть TOLK (WebApp)",
-                    "web_app": {"url": WEBAPP_URL}
-                }
-            ],
-            [
-                {
-                    "text": "🌐 Открыть в браузере",
-                    "url": WEBAPP_URL
-                }
-            ]
-        ]
-    }
 
-    telegram_api("sendMessage", {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown",
-        "reply_markup": keyboard
+def setup(client: httpx.Client) -> None:
+    me = call(client, "getMe")
+    log.info("Authorized as @%s", me["username"])
+    if settings.telegram_bot_username and settings.telegram_bot_username.lstrip("@") != me["username"]:
+        log.warning("TELEGRAM_BOT_USERNAME (%s) does not match the token's bot (@%s)",
+                    settings.telegram_bot_username, me["username"])
+    call(client, "deleteWebhook", drop_pending_updates=False)  # polling and webhooks are mutually exclusive
+    call(client, "setChatMenuButton", menu_button={
+        "type": "web_app", "text": "TOLK", "web_app": {"url": settings.tolk_webapp_url},
     })
+    for lang, cmds in COMMANDS.items():
+        call(client, "setMyCommands", commands=[{"command": c, "description": d} for c, d in cmds],
+             **({} if lang == "uz" else {"language_code": lang}))
 
-def run_bot_polling():
-    print(f"Connecting to bot with token {BOT_TOKEN[:10]}...")
-    bot_info = telegram_api("getMe")
-    if not bot_info or not bot_info.get("ok"):
-        print("[ERROR] Invalid Telegram Bot Token! Please check your token from @BotFather.")
-        return
 
-    bot_user = bot_info["result"]
-    print(f"[OK] Bot authorized as @{bot_user.get('username')} ({bot_user.get('first_name')})")
-    print(f"[OK] WebApp URL: {WEBAPP_URL}")
+def run() -> None:
+    if not settings.telegram_bot_token:
+        sys.exit("TELEGRAM_BOT_TOKEN is not set")
+    if not settings.tolk_webapp_url.startswith("https://"):
+        sys.exit("TOLK_WEBAPP_URL must be your public https:// address (Telegram requires HTTPS for Mini Apps)")
 
-    setup_menu_button()
+    with httpx.Client() as client:
+        setup(client)
+        offset = 0
+        log.info("Polling for updates...")
+        while True:
+            try:
+                updates = call(client, "getUpdates", offset=offset, timeout=30, allowed_updates=["message"])
+                for update in updates:
+                    offset = update["update_id"] + 1
+                    msg = update.get("message") or {}
+                    if msg.get("chat", {}).get("type") == "private" and msg.get("from"):
+                        send_welcome(client, msg["chat"]["id"], msg["from"])
+            except KeyboardInterrupt:
+                break
+            except Exception as exc:  # network hiccups, Telegram 5xx: wait and keep polling
+                log.warning("Polling error: %s", exc)
+                time.sleep(5)
 
-    print("\nBot is now actively listening for messages... (Press Ctrl+C to stop)")
-    offset = 0
-
-    while True:
-        try:
-            updates = telegram_api("getUpdates", {"offset": offset, "timeout": 20})
-            if updates and updates.get("ok"):
-                for upd in updates["result"]:
-                    offset = upd["update_id"] + 1
-                    msg = upd.get("message")
-                    if not msg:
-                        continue
-
-                    chat_id = msg["chat"]["id"]
-                    text = msg.get("text", "")
-                    user_first_name = msg.get("from", {}).get("first_name", "Студент")
-
-                    if text.startswith("/start") or text.startswith("/app"):
-                        send_welcome(chat_id, user_first_name)
-                    else:
-                        send_welcome(chat_id, user_first_name)
-        except KeyboardInterrupt:
-            print("\nBot stopped by user.")
-            break
-        except Exception as e:
-            print(f"[WARNING] Polling error: {e}")
-            time.sleep(2)
 
 if __name__ == "__main__":
-    if not BOT_TOKEN:
-        print("=" * 60)
-        print("TOLK TELEGRAM WEBAPP BOT SETUP")
-        print("=" * 60)
-        BOT_TOKEN = input("Enter your Telegram Bot Token from @BotFather: ").strip()
-
-    if not WEBAPP_URL:
-        WEBAPP_URL = input("Enter your ngrok HTTPS URL (e.g. https://xxxx.ngrok-free.app): ").strip()
-        if not WEBAPP_URL.startswith("http"):
-            WEBAPP_URL = "https://" + WEBAPP_URL
-
-    run_bot_polling()
+    run()

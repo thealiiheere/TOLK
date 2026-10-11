@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tolk-dev",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["run.py"],
+      "port": 8000,
+      "env": {
+        "DATABASE_URL": "sqlite:///data/dev.db",
+        "DEMO_MODE": "true",
+        "TOLK_WEBAPP_URL": "",
+        "PAYMENT_CARD_NUMBER": "8600 1234 5678 9012",
+        "PAYMENT_CARD_HOLDER": "TOLK Education",
+        "SUPPORT_CONTACT": "@tolk_support"
+      }
+    }
+  ]
+}

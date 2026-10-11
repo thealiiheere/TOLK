@@ -2,7 +2,19 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
 .env
-.venv
-env/
+.venv/
 venv/
+env/
+
+# runtime data: databases and uploaded receipts (private!)
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+app/uploads/
+
+# deploy-time files
+Caddyfile.local

@@ -1,459 +1,167 @@
-// TOLK Platform Main Application Core
-const State = {
-    user: null,
-    token: localStorage.getItem('tolk_token') || null,
-    currentScreen: 'landing', // 'landing', 'student', 'tutor', 'admin'
-    demoUsers: []
-};
+// App boot: Telegram integration, session restore, shell (top bar + bottom tabs), routing.
+import {
+  api, avatar, currentRoute, findRoute, go, homeFor, html, icon, inTelegram, mount, nextRender, on, route, setToken,
+  setUser, state, storage, toastError,
+} from './core.js';
+import { LANGS, detectLang, getLang, setLang, t } from './i18n.js';
+import * as account from './pages/account.js';
+import * as catalog from './pages/class.js';
+import * as admin from './pages/admin.js';
+import * as explore from './pages/explore.js';
+import * as student from './pages/student.js';
+import * as tutor from './pages/tutor.js';
 
-// Initialize app on DOM ready
-document.addEventListener('DOMContentLoaded', async () => {
-    await initTelegramWebApp();
-    await loadDemoUsers();
-    await checkAuth();
-    setupGlobalEvents();
+route('/', explore.render, { tab: 'explore' });
+route('/class/:id', catalog.renderClass, { tab: 'explore', back: true });
+route('/teacher/:id', catalog.renderTeacher, { tab: 'explore', back: true });
+route('/login', account.renderLogin, { tab: 'login', guest: true });
+route('/welcome', account.renderOnboarding, { auth: true });
+route('/profile', account.renderProfile, { tab: 'profile', auth: true });
+route('/my', student.render, { tab: 'my', role: 'student' });
+route('/teach', tutor.render, { tab: 'teach', role: 'tutor' });
+route('/admin', admin.render, { tab: 'admin', role: 'admin' });
+route('/admin/:tab', admin.render, { tab: 'admin', role: 'admin', back: true });
+
+// ---------- theme ----------
+function applyTheme() {
+  const tg = state.tg;
+  const dark = tg?.colorScheme ? tg.colorScheme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  const surface = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim();
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  try { tg?.setHeaderColor?.(surface); tg?.setBackgroundColor?.(bg); tg?.setBottomBarColor?.(surface); } catch { /* old clients */ }
+}
+
+function initTelegram() {
+  const tg = state.tg;
+  if (!tg) return;
+  try {
+    tg.ready();
+    tg.expand();
+    tg.disableVerticalSwipes?.();
+    tg.onEvent?.('themeChanged', applyTheme);
+    tg.BackButton?.onClick(() => (history.length > 1 ? history.back() : go('/')));
+  } catch { /* running outside Telegram or an old client */ }
+}
+
+// ---------- session ----------
+async function restoreSession() {
+  try {
+    const widget = await account.widgetLoginFromUrl();
+    if (widget) return;
+  } catch (err) { toastError(err); }
+  if (state.token) {
+    try { state.user = await api('/api/auth/me'); } catch { setToken(null); state.user = null; }
+  }
+  if (!state.user && inTelegram()) {
+    try { await account.telegramLogin(); } catch (err) { toastError(err); }
+  }
+}
+
+// ---------- shell ----------
+function navItems() {
+  const u = state.user;
+  const items = [{ tab: 'explore', href: '#/', icon: 'compass', label: t('nav_explore') }];
+  if (!u) items.push({ tab: 'login', href: '#/login', icon: 'login', label: t('nav_sign_in'), mobileOnly: true });
+  else if (u.onboarded && u.role === 'student') items.push({ tab: 'my', href: '#/my', icon: 'book', label: t('nav_my_learning') });
+  else if (u.onboarded && u.role === 'tutor') items.push({ tab: 'teach', href: '#/teach', icon: 'board', label: t('nav_teaching') });
+  else if (u.onboarded && u.role === 'admin') items.push({ tab: 'admin', href: '#/admin', icon: 'shield', label: t('nav_admin') });
+  if (u?.onboarded) items.push({ tab: 'profile', href: '#/profile', icon: 'user', label: t('nav_profile'), mobileOnly: true });
+  return items;
+}
+
+function renderShell(activeTab = '') {
+  const u = state.user;
+  const items = navItems();
+  mount(document.getElementById('appbar'), html`
+    <div class="container">
+      <a class="brand" href="#/"><span class="brand-mark">T</span><span>TOLK<small>${t('tagline')}</small></span></a>
+      <nav class="nav">${items.filter((i) => !i.mobileOnly).map((i) => html`<a href="${i.href}" class="${i.tab === activeTab ? 'active' : ''}">${i.label}</a>`)}</nav>
+      <div class="appbar-end">
+        <details class="dropdown" id="lang-menu">
+          <summary class="lang-btn" aria-label="${t('interface_language')}">${icon('globe')}${getLang().toUpperCase()}</summary>
+          <div class="dropdown-menu">${Object.entries(LANGS).map(([code, name]) => html`
+            <button class="${code === getLang() ? 'active' : ''}" data-action="set-lang" data-lang="${code}">${name}</button>`)}</div>
+        </details>
+        ${u ? html`<details class="dropdown" id="user-menu">
+            <summary aria-label="${t('nav_profile')}">${avatar(u, 'avatar-sm')}</summary>
+            <div class="dropdown-menu">
+              <div style="padding:8px 12px"><div class="bold small truncate">${u.full_name}</div><div class="tiny muted">${t(`role_${u.role}`)}</div></div>
+              ${u.onboarded ? html`<a href="#/profile">${icon('user')} ${t('profile')}</a>` : ''}
+              <button data-action="logout">${icon('logout')} ${t('sign_out')}</button>
+            </div></details>`
+          : html`<a class="btn btn-primary btn-sm" href="#/login">${t('nav_sign_in')}</a>`}
+      </div>
+    </div>`);
+  const tabbar = document.getElementById('tabbar');
+  const showTabbar = items.length > 1;
+  tabbar.hidden = !showTabbar;
+  document.body.classList.toggle('no-tabbar', !showTabbar);
+  mount(tabbar, items.map((i) => html`<a href="${i.href}" class="${i.tab === activeTab ? 'active' : ''}">${icon(i.icon)}<span>${i.label}</span></a>`));
+}
+
+let lastPath = null;
+async function renderRoute() {
+  const { path, query } = currentRoute();
+  const r = findRoute(path) || findRoute('/');
+  const u = state.user;
+  if (u && !u.onboarded && path !== '/welcome') return go('/welcome');
+  if ((r.auth || r.role) && !u) return go(`/login?next=${encodeURIComponent(path)}`);
+  if (r.role && u.role !== r.role) return go(homeFor(u));
+  if (r.guest && u) return go(homeFor(u));
+
+  document.querySelectorAll('details.dropdown[open]').forEach((d) => { d.open = false; });
+  renderShell(r.tab);
+  if (state.tg?.BackButton) {
+    try { (r.back ? state.tg.BackButton.show() : state.tg.BackButton.hide()); } catch { /* ignore */ }
+  }
+  if (path !== lastPath) window.scrollTo(0, 0);
+  lastPath = path;
+  const alive = nextRender();
+  try {
+    await r.handler(document.getElementById('view'), r.params, query, alive);
+  } catch (err) {
+    console.error(err);
+    toastError(err);
+  }
+}
+
+// ---------- global handlers ----------
+on('set-lang', async (el) => {
+  const lang = el.dataset.lang;
+  setLang(lang);
+  storage.set('tolk_lang', lang);
+  document.getElementById('lang-menu').open = false;
+  if (state.user) {
+    try { setUser(await api('/api/auth/me', { method: 'PATCH', body: { lang } })); } catch { /* keep local choice */ }
+  }
+  renderRoute();
 });
+on('logout', async () => {
+  try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+  setToken(null);
+  state.user = null;
+  go('/');
+});
+document.addEventListener('tolk:user', () => renderShell(findRoute(currentRoute().path)?.tab));
+document.addEventListener('tolk:signed-out', () => go('/login'));
+document.addEventListener('click', (e) => {
+  // close dropdowns when clicking outside / on a link inside them
+  document.querySelectorAll('details.dropdown[open]').forEach((d) => {
+    if (!d.contains(e.target) || e.target.closest('a')) d.open = false;
+  });
+});
+window.addEventListener('hashchange', renderRoute);
 
-// Telegram WebApp helper & Haptic Feedback
-function tgHaptic(type = 'light') {
-    if (window.Telegram?.WebApp?.HapticFeedback) {
-        if (type === 'success' || type === 'error' || type === 'warning') {
-            window.Telegram.WebApp.HapticFeedback.notificationOccurred(type);
-        } else {
-            window.Telegram.WebApp.HapticFeedback.impactOccurred(type);
-        }
-    }
+async function boot() {
+  initTelegram();
+  applyTheme();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
+  setLang(detectLang(storage.get('tolk_lang'), state.tg?.initDataUnsafe?.user?.language_code));
+  try { state.config = await api('/api/config'); } catch { state.config = {}; }
+  await restoreSession();
+  if (state.user?.lang) setLang(state.user.lang); // the saved account preference wins
+  await renderRoute();
 }
 
-async function initTelegramWebApp() {
-    if (window.Telegram && window.Telegram.WebApp) {
-        const tg = window.Telegram.WebApp;
-        try {
-            tg.ready();
-            tg.expand();
-            if (tg.setHeaderColor) tg.setHeaderColor('#FFFFFF');
-            if (tg.setBackgroundColor) tg.setBackgroundColor('#F8F9FA');
-            if (tg.enableClosingConfirmation) tg.enableClosingConfirmation();
-
-            // Auto-login if opened inside Telegram and user data is available
-            const tgUser = tg.initDataUnsafe?.user;
-            if (tgUser && !State.token) {
-                console.log("Authenticating Telegram User:", tgUser);
-                const res = await fetch('/api/auth/telegram-webapp', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        id: tgUser.id,
-                        first_name: tgUser.first_name || '',
-                        last_name: tgUser.last_name || '',
-                        username: tgUser.username || null
-                    })
-                });
-                const data = await res.json();
-                if (res.ok && data.token) {
-                    State.token = data.token;
-                    State.user = data.user;
-                    localStorage.setItem('tolk_token', data.token);
-                    tgHaptic('success');
-                }
-            }
-            console.log("Telegram WebApp initialized successfully");
-        } catch (e) {
-            console.log("Telegram WebApp context notice:", e);
-        }
-    }
-}
-
-// Global API Fetch helper with Auth headers
-async function apiFetch(endpoint, options = {}) {
-    const headers = options.headers || {};
-    if (State.token) {
-        headers['Authorization'] = `Bearer ${State.token}`;
-        headers['X-Auth-Token'] = State.token;
-    }
-    
-    // If body is FormData, do not set Content-Type so browser sets boundary
-    if (!(options.body instanceof FormData)) {
-        headers['Content-Type'] = headers['Content-Type'] || 'application/json';
-    }
-
-    try {
-        const response = await fetch(endpoint, { ...options, headers });
-        if (response.status === 401) {
-            // Unauthorized
-            logoutUser(false);
-            showToast("Сессия истекла. Пожалуйста, войдите снова.", "warning");
-            throw new Error("Unauthorized");
-        }
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data.detail || data.message || "Ошибка сервера");
-        }
-        return data;
-    } catch (err) {
-        console.error(`API Error on ${endpoint}:`, err);
-        throw err;
-    }
-}
-
-// Load demo users for Quick Switcher
-async function loadDemoUsers() {
-    try {
-        const res = await fetch('/api/auth/demo-users');
-        const data = await res.json();
-        State.demoUsers = data.demo_users || [];
-        renderDemoUsersList();
-    } catch (e) {
-        console.error("Failed to load demo accounts", e);
-    }
-}
-
-// Check current user session
-async function checkAuth() {
-    if (!State.token) {
-        renderHeader();
-        navigateTo('landing');
-        return;
-    }
-
-    try {
-        const data = await apiFetch('/api/auth/me');
-        State.user = data.user;
-        renderHeader();
-        // Route to corresponding role screen
-        if (State.user.role === 'admin') {
-            navigateTo('admin');
-        } else if (State.user.role === 'tutor') {
-            navigateTo('tutor');
-        } else {
-            navigateTo('student');
-        }
-    } catch (e) {
-        logoutUser(false);
-    }
-}
-
-// Quick demo login
-async function loginDemoUser(userId) {
-    try {
-        const res = await fetch('/api/auth/demo-login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Ошибка входа");
-
-        State.token = data.token;
-        State.user = data.user;
-        localStorage.setItem('tolk_token', data.token);
-
-        closeModal('demoSwitchModal');
-        closeModal('authModal');
-        renderHeader();
-
-        showToast(`Вход выполнен: ${data.user.full_name} (${getRoleBadgeText(data.user.role)})`, "success");
-
-        if (data.user.role === 'admin') {
-            navigateTo('admin');
-        } else if (data.user.role === 'tutor') {
-            navigateTo('tutor');
-        } else {
-            navigateTo('student');
-        }
-    } catch (err) {
-        showToast(err.message, "danger");
-    }
-}
-
-// Phone login or registration
-async function loginWithPhone(phone, fullName = "", telegramUsername = "") {
-    try {
-        const res = await fetch('/api/auth/login-phone', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                phone: phone,
-                full_name: fullName,
-                telegram_username: telegramUsername
-            })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Ошибка входа");
-
-        State.token = data.token;
-        State.user = data.user;
-        localStorage.setItem('tolk_token', data.token);
-
-        closeModal('authModal');
-        renderHeader();
-
-        showToast(`Добро пожаловать, ${data.user.full_name}!`, "success");
-
-        if (data.user.role === 'admin') {
-            navigateTo('admin');
-        } else if (data.user.role === 'tutor') {
-            navigateTo('tutor');
-        } else {
-            navigateTo('student');
-        }
-    } catch (err) {
-        showToast(err.message, "danger");
-    }
-}
-
-// Logout
-async function logoutUser(notify = true) {
-    try {
-        if (State.token) {
-            await fetch('/api/auth/logout', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${State.token}` }
-            });
-        }
-    } catch (e) {}
-
-    State.token = null;
-    State.user = null;
-    localStorage.removeItem('tolk_token');
-    renderHeader();
-    navigateTo('landing');
-    if (notify) showToast("Вы вышли из системы", "info");
-}
-
-// Navigation between screens
-function navigateTo(screen) {
-    State.currentScreen = screen;
-
-    // Screens
-    const screens = ['landing', 'student', 'tutor', 'admin'];
-    screens.forEach(s => {
-        const el = document.getElementById(`screen-${s}`);
-        if (el) el.classList.add('hidden');
-    });
-
-    const activeEl = document.getElementById(`screen-${screen}`);
-    if (activeEl) {
-        activeEl.classList.remove('hidden');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    renderHeader();
-
-    // Trigger screen-specific initializers
-    if (screen === 'landing' && window.Landing) window.Landing.init();
-    if (screen === 'student' && window.StudentCabinet) window.StudentCabinet.load();
-    if (screen === 'tutor' && window.TutorCabinet) window.TutorCabinet.load();
-    if (screen === 'admin' && window.AdminPanel) window.AdminPanel.load();
-}
-
-// Helpers for role text and colors
-function getRoleBadgeText(role) {
-    if (role === 'admin') return 'Администратор';
-    if (role === 'tutor') return 'Тьютор';
-    return 'Ученик';
-}
-
-function getRoleBadgeClass(role) {
-    if (role === 'admin') return 'bg-purple-100 text-purple-800 border border-purple-200';
-    if (role === 'tutor') return 'bg-blue-100 text-blue-800 border border-blue-200';
-    return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
-}
-
-// Header rendering
-function renderHeader() {
-    const userControls = document.getElementById('header-user-controls');
-    const navLinks = document.getElementById('header-nav-links');
-    if (!userControls) return;
-
-    if (!State.user) {
-        userControls.innerHTML = `
-            <button onclick="openModal('demoSwitchModal')" class="btn-secondary text-xs sm:text-sm py-1.5 px-3">
-                <span class="inline-block w-2 h-2 rounded-full bg-orange-500 animate-ping"></span>
-                Быстрый демо-вход
-            </button>
-            <button onclick="openModal('authModal')" class="btn-primary text-xs sm:text-sm py-1.5 px-3">
-                Войти / Записаться
-            </button>
-        `;
-        if (navLinks) {
-            navLinks.innerHTML = `
-                <a href="#about" onclick="navigateTo('landing')" class="text-gray-600 hover:text-orange-600 text-sm font-medium">О платформе</a>
-                <a href="#tariffs" onclick="navigateTo('landing')" class="text-gray-600 hover:text-orange-600 text-sm font-medium">Тарифы</a>
-            `;
-        }
-    } else {
-        const u = State.user;
-        let roleScreenButton = '';
-        if (u.role === 'student') {
-            roleScreenButton = `<button onclick="navigateTo('student')" class="text-sm font-semibold text-gray-700 hover:text-orange-600 px-2 py-1 rounded">Мой Кабинет</button>`;
-        } else if (u.role === 'tutor') {
-            roleScreenButton = `<button onclick="navigateTo('tutor')" class="text-sm font-semibold text-gray-700 hover:text-orange-600 px-2 py-1 rounded">Кабинет Тьютора</button>`;
-        } else if (u.role === 'admin') {
-            roleScreenButton = `<button onclick="navigateTo('admin')" class="text-sm font-semibold text-gray-700 hover:text-orange-600 px-2 py-1 rounded">Админка</button>`;
-        }
-
-        if (navLinks) {
-            navLinks.innerHTML = `
-                <button onclick="navigateTo('landing')" class="text-sm font-medium text-gray-600 hover:text-orange-600">Главная</button>
-                ${roleScreenButton}
-            `;
-        }
-
-        userControls.innerHTML = `
-            <div class="flex items-center gap-2">
-                <button onclick="openModal('demoSwitchModal')" class="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2.5 py-1.5 rounded-lg hover:bg-orange-100 font-medium hidden md:inline-flex items-center gap-1">
-                    <span>Сменить аккаунт</span>
-                </button>
-                <div class="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1">
-                    <div class="text-left text-xs">
-                        <div class="font-bold text-gray-900 leading-tight">${u.full_name}</div>
-                        <span class="inline-block px-1.5 py-0.2 rounded text-[10px] font-semibold ${getRoleBadgeClass(u.role)}">
-                            ${getRoleBadgeText(u.role)}
-                        </span>
-                    </div>
-                    <button onclick="logoutUser()" title="Выйти" class="text-gray-400 hover:text-red-500 p-1 rounded transition">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-}
-
-// Render Demo Users modal list
-function renderDemoUsersList() {
-    const container = document.getElementById('demo-users-list');
-    if (!container) return;
-
-    if (!State.demoUsers || State.demoUsers.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 text-sm">Загрузка аккаунтов...</p>';
-        return;
-    }
-
-    let html = '';
-    
-    // Group by roles
-    const admins = State.demoUsers.filter(u => u.role === 'admin');
-    const tutors = State.demoUsers.filter(u => u.role === 'tutor');
-    const students = State.demoUsers.filter(u => u.role === 'student');
-
-    html += `<div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Администратор</div>`;
-    admins.forEach(u => {
-        html += demoUserCard(u, 'bg-purple-50 hover:bg-purple-100 border-purple-200');
-    });
-
-    html += `<div class="text-xs font-bold text-gray-400 uppercase tracking-wider mt-4 mb-2">Тьюторы (Преподаватели)</div>`;
-    tutors.forEach(u => {
-        html += demoUserCard(u, 'bg-blue-50 hover:bg-blue-100 border-blue-200');
-    });
-
-    html += `<div class="text-xs font-bold text-gray-400 uppercase tracking-wider mt-4 mb-2">Ученики (Тестовая группа + демо)</div>`;
-    students.forEach(u => {
-        let strikeText = '';
-        if (u.strikes !== null && u.strikes !== undefined) {
-            if (u.strikes >= 3) strikeText = `<span class="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">🔴 3 страйка (Блок)</span>`;
-            else if (u.strikes === 2) strikeText = `<span class="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">⚠️ 2 страйка</span>`;
-            else if (u.strikes === 1) strikeText = `<span class="bg-amber-400 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">⚠️ 1 страйк</span>`;
-            else strikeText = `<span class="bg-emerald-500 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">🟢 0 страйков</span>`;
-        } else {
-            strikeText = `<span class="bg-gray-200 text-gray-700 text-[10px] px-1.5 py-0.5 rounded">Без группы</span>`;
-        }
-        html += demoUserCard(u, 'bg-gray-50 hover:bg-orange-50 border-gray-200 hover:border-orange-300', strikeText);
-    });
-
-    container.innerHTML = html;
-}
-
-function demoUserCard(u, colorClasses, extraBadge = '') {
-    return `
-        <div onclick="loginDemoUser(${u.id})" class="cursor-pointer border rounded-xl p-3 mb-2 transition flex items-center justify-between ${colorClasses}">
-            <div>
-                <div class="font-semibold text-sm text-gray-900 flex items-center gap-2">
-                    ${u.full_name}
-                    ${extraBadge}
-                </div>
-                <div class="text-xs text-gray-500 flex items-center gap-2">
-                    <span>${u.phone}</span>
-                    <span>•</span>
-                    <span>${u.telegram_username || '@user'}</span>
-                    ${u.group_name ? `<span class="text-xs text-orange-600 truncate max-w-[200px]">• ${u.group_name}</span>` : ''}
-                </div>
-            </div>
-            <div class="text-xs font-semibold text-orange-600">
-                Войти →
-            </div>
-        </div>
-    `;
-}
-
-// Global modal helpers
-function openModal(id) {
-    const el = document.getElementById(id);
-    if (el) {
-        el.classList.remove('hidden');
-        el.classList.add('flex');
-    }
-}
-
-function closeModal(id) {
-    const el = document.getElementById(id);
-    if (el) {
-        el.classList.add('hidden');
-        el.classList.remove('flex');
-    }
-}
-
-// Global event listeners (forms, clicks outside)
-function setupGlobalEvents() {
-    // Phone auth form
-    const authForm = document.getElementById('phone-auth-form');
-    if (authForm) {
-        authForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const phone = document.getElementById('auth-phone').value;
-            const name = document.getElementById('auth-name').value;
-            const tg = document.getElementById('auth-telegram').value;
-            loginWithPhone(phone, name, tg);
-        });
-    }
-
-    // Close modals on backdrop click
-    document.querySelectorAll('.modal-backdrop').forEach(modal => {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                closeModal(modal.id);
-            }
-        });
-    });
-}
-
-// Toast notification helper
-function showToast(message, type = 'info') {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
-
-    const toast = document.createElement('div');
-    const bgColors = {
-        success: 'bg-emerald-600 text-white',
-        danger: 'bg-red-600 text-white',
-        warning: 'bg-amber-600 text-white',
-        info: 'bg-gray-800 text-white'
-    };
-
-    toast.className = `${bgColors[type] || bgColors.info} px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center justify-between gap-3 transform transition-all duration-300 translate-y-2 opacity-0`;
-    toast.innerHTML = `
-        <span>${message}</span>
-        <button onclick="this.parentElement.remove()" class="opacity-75 hover:opacity-100">&times;</button>
-    `;
-
-    container.appendChild(toast);
-    setTimeout(() => {
-        toast.classList.remove('translate-y-2', 'opacity-0');
-    }, 10);
-
-    setTimeout(() => {
-        toast.classList.add('translate-y-2', 'opacity-0');
-        setTimeout(() => toast.remove(), 300);
-    }, 4000);
-}
+boot();
