@@ -4,7 +4,9 @@ import {
   on, openLink, openSheet, state, stars, strikesDots, subjectIcon, subjectInfo, toLocalInput, toast, toastError,
 } from '../core.js';
 import { t } from '../i18n.js';
-import { lessonRow, ratingSummary, reviewList } from './components.js';
+import {
+  certificatesError, certificatesField, documentList, lessonRow, ratingSummary, reviewList,
+} from './components.js';
 
 let dash = null;
 let sheetRef = null;
@@ -21,10 +23,15 @@ export async function render(view, _params, _query, alive) {
   const d = dash;
   if (d.tutor_status !== 'approved') {
     const rejected = d.tutor_status === 'rejected';
-    mount(view, html`<div class="container" style="max-width:640px"><div class="card">${empty(rejected ? '🙁' : '⏳',
-      rejected ? t('application_rejected') : t('application_pending'),
-      rejected ? t('application_rejected_text', { contact: state.config.support_contact || '' }) : t('application_pending_text'),
-      html`<a class="btn btn-outline" href="#/profile">${t('edit_profile')}</a>`)}</div></div>`);
+    mount(view, html`<div class="container stack-lg" style="max-width:640px">
+      <div class="card">${empty(rejected ? '🙁' : '⏳',
+        rejected ? t('application_rejected') : t('application_pending'),
+        rejected ? t('application_rejected_text', { contact: state.config.support_contact || '' }) : t('application_pending_text'),
+        html`<a class="btn btn-outline" href="#/profile">${t('edit_profile')}</a>`)}</div>
+      ${rejected && d.tutor_review_note ? html`<div class="notice notice-danger"><span class="ico">💬</span>
+        <div><b>${t('rejection_reason')}:</b> ${d.tutor_review_note}</div></div>` : ''}
+      ${documentsCard(d.documents, rejected ? t('reapply_with_docs') : t('upload_more_docs'), rejected)}
+    </div>`);
     return;
   }
   const toComplete = d.groups.reduce((n, g) => n + g.to_complete.length, 0);
@@ -46,8 +53,37 @@ export async function render(view, _params, _query, alive) {
         <div class="divider"></div>
         ${reviewList(d.reviews)}
       </div>
+      ${documentsCard(d.documents, t('upload_more_docs'), false)}
     </div>`);
 }
+
+function documentsCard(docs, buttonLabel, open) {
+  return html`<div class="card card-pad stack">
+    <h3>${t('my_certificates')}</h3>
+    ${documentList(docs)}
+    <details ${open ? 'open' : ''}><summary class="small bold" style="cursor:pointer;color:var(--primary)">${icon('plus')} ${buttonLabel}</summary>
+      <form class="stack mt" data-submit="docs-upload">${certificatesField()}
+        <button class="btn btn-primary" type="submit">${buttonLabel}</button></form>
+    </details>
+  </div>`;
+}
+
+on('docs-upload', async (form) => {
+  const files = form.certificates.files;
+  const error = certificatesError(files);
+  if (error) return toast(error, 'warning');
+  const fd = new FormData();
+  [...files].forEach((f) => fd.append('certificates', f));
+  await busy(form.querySelector('[type=submit]'), async () => {
+    try {
+      const res = await api('/api/tutor/documents', { method: 'POST', form: fd });
+      const reapplied = state.user.tutor_status === 'rejected' && res.tutor_status === 'pending';
+      state.user.tutor_status = res.tutor_status;
+      toast(reapplied ? t('reapplied') : t('docs_uploaded'), 'success');
+      go('/teach');
+    } catch (err) { toastError(err); }
+  });
+});
 
 function groupCard(g) {
   const s = subjectInfo(g);

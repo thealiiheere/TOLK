@@ -138,7 +138,12 @@ def get_current_user_optional(request: Request, db: DbSession = Depends(get_db))
         db.delete(session)
         db.commit()
         return None
-    return session.user
+    user = session.user
+    if user.telegram_id in settings.admin_ids and user.role != "admin":
+        # ADMIN_TELEGRAM_IDS changed while this user was signed in: apply it now instead of at the next sign-in
+        user.role, user.onboarded, user.tutor_status = "admin", True, None
+        db.commit()
+    return user
 
 
 def get_current_user(user: User | None = Depends(get_current_user_optional)) -> User:

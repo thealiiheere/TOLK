@@ -4,7 +4,7 @@ import {
   mount, on, openSheet, periodLabel, ratingBadge, strikesDots, subjectIcon, subjectInfo, toast, toastError,
 } from '../core.js';
 import { LANGUAGE_CODES, subjectName, t } from '../i18n.js';
-import { paymentStatus } from './components.js';
+import { documentList, paymentStatus } from './components.js';
 
 const TABS = ['overview', 'payments', 'classes', 'teachers', 'users', 'discipline'];
 let stats = {};
@@ -296,20 +296,52 @@ async function teachers(body, _query, alive) {
         <span class="badge badge-${x.tutor_status === 'approved' ? 'success' : x.tutor_status === 'rejected' ? 'danger' : 'warning'}">${t(`status_${x.tutor_status || 'pending'}`)}</span></div>
       ${x.subjects ? html`<div class="small"><b>${t('subjects')}:</b> ${x.subjects}</div>` : ''}
       ${x.bio ? html`<p class="small muted prose">${x.bio}</p>` : ''}
+      <div><div class="label">${t('certificates')} (${x.documents.length})</div>${documentList(x.documents, x.id)}</div>
+      ${x.review_note ? html`<div class="tiny muted">💬 ${t('rejection_reason')}: ${x.review_note}</div>` : ''}
       <div class="row-wrap small">${ratingBadge(x)}<span class="muted">· ${t('classes_count', { n: x.groups_count })}</span><span class="tiny faint">· ${fmtDate(x.created_at)}</span></div>
       <div class="row-wrap">
-        ${x.tutor_status !== 'approved' ? html`<button class="btn btn-success btn-sm" data-action="tutor-decide" data-id="${x.id}" data-v="approved">${icon('check')} ${t('approve')}</button>` : ''}
+        ${x.tutor_status !== 'approved' ? html`<button class="btn btn-success btn-sm" data-action="tutor-decide" data-id="${x.id}" data-v="approved"
+          ${x.documents.length ? '' : html`disabled title="${t('approve_needs_docs')}"`}>${icon('check')} ${t('approve')}</button>` : ''}
         ${x.tutor_status !== 'rejected' ? html`<button class="btn btn-danger-soft btn-sm" data-action="tutor-decide" data-id="${x.id}" data-v="rejected">${x.tutor_status === 'approved' ? t('revoke') : t('reject')}</button>` : ''}
         ${x.tutor_status === 'approved' ? html`<a class="btn btn-ghost btn-sm" href="#/teacher/${x.id}">${t('view_profile')}</a>` : ''}
       </div>
     </div>`)}</div>` : html`<div class="card">${empty('🧑‍🏫', t('no_teachers'), t('no_teachers_text'))}</div>`);
 }
 on('tutor-decide', async (el) => {
-  if (el.dataset.v === 'rejected' && !(await confirmSheet(t('reject_teacher_confirm'), { okText: t('confirm'), danger: true }))) return;
+  if (el.dataset.v === 'rejected') {
+    sheetRef = openSheet({
+      title: t('reject_teacher'),
+      body: html`<form class="stack" data-submit="tutor-reject" data-id="${el.dataset.id}">
+        <p class="small muted">${t('reject_teacher_confirm')}</p>
+        <label class="field"><span>${t('reason_for_teacher')}</span>
+          <textarea class="textarea" name="comment" maxlength="500" placeholder="${t('reject_teacher_placeholder')}"></textarea></label>
+        <button class="btn btn-danger btn-block" type="submit">${t('reject')}</button></form>`,
+    });
+    return;
+  }
   try {
-    await api(`/api/admin/tutors/${el.dataset.id}/decision`, { method: 'POST', body: { status: el.dataset.v } });
+    await api(`/api/admin/tutors/${el.dataset.id}/decision`, { method: 'POST', body: { status: 'approved' } });
     toast(t('saved'), 'success');
     reload();
+  } catch (err) { toastError(err); }
+});
+on('tutor-reject', async (form) => {
+  await busy(form.querySelector('[type=submit]'), async () => {
+    try {
+      await api(`/api/admin/tutors/${form.dataset.id}/decision`, { method: 'POST', body: { status: 'rejected', comment: form.comment.value } });
+      sheetRef?.close();
+      toast(t('saved'), 'success');
+      reload();
+    } catch (err) { toastError(err); }
+  });
+});
+on('doc-view', async (el) => {
+  try {
+    const blob = await api(`/api/admin/tutors/${el.dataset.tutor}/documents/${el.dataset.id}`, { blob: true });
+    const url = URL.createObjectURL(blob);
+    receiptUrls.push(url);
+    if (el.dataset.pdf) { window.open(url, '_blank', 'noopener'); return; }
+    openSheet({ title: t('certificates'), wide: true, body: html`<img src="${url}" alt="" style="margin:0 auto;max-height:75vh;border-radius:12px">` });
   } catch (err) { toastError(err); }
 });
 

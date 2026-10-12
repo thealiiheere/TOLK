@@ -1,7 +1,7 @@
 // Reusable rendering blocks shared by several pages.
 import {
-  avatar, fmtDate, fmtNumber, fmtPrice, fmtRelative, html, icon, meetingPlatform, periodLabel, ratingBadge, stars,
-  subjectIcon, subjectInfo,
+  avatar, fmtDate, fmtNumber, fmtPrice, fmtRelative, html, icon, meetingPlatform, mount, on, periodLabel, ratingBadge,
+  stars, state, subjectIcon, subjectInfo,
 } from '../core.js';
 import { t } from '../i18n.js';
 
@@ -92,6 +92,48 @@ export function lessonRow(lesson, { title, actions = '', sub = '' } = {}) {
 export function paymentStatus(status) {
   const tone = { pending: 'warning', approved: 'success', rejected: 'danger' }[status] || '';
   return html`<span class="badge badge-${tone}">${t(`payment_${status}`)}</span>`;
+}
+
+// ---------- teacher certificates ----------
+export const MAX_CERTS_PER_UPLOAD = 5;
+const CERT_ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf';
+
+/** File picker for certificates / diplomas (multiple files). Lives inside a <form>; field name "certificates". */
+export function certificatesField() {
+  return html`<div class="field"><span>${t('certificates')}</span>
+    <label class="file-drop">
+      <input type="file" name="certificates" multiple accept="${CERT_ACCEPT}" data-change="certs-picked">
+      <span style="font-size:28px">🎓</span>
+      <span class="bold">${t('upload_certificates')}</span>
+      <span class="tiny">${t('certificates_hint', { n: MAX_CERTS_PER_UPLOAD, mb: state.config.max_upload_mb || 5 })}</span>
+      <span class="small stack" style="gap:2px" data-cert-list></span>
+    </label></div>`;
+}
+
+/** Client-side check before uploading; returns an error message or ''. The server validates again. */
+export function certificatesError(files) {
+  const mb = state.config.max_upload_mb || 5;
+  if (!files?.length) return t('certificates_required_ui');
+  if (files.length > MAX_CERTS_PER_UPLOAD) return t('too_many_certs', { n: MAX_CERTS_PER_UPLOAD });
+  if ([...files].some((f) => f.size > mb * 1024 * 1024)) return t('file_too_large', { mb });
+  return '';
+}
+
+on('certs-picked', (input) => {
+  const list = input.closest('.file-drop').querySelector('[data-cert-list]');
+  mount(list, [...input.files].map((f) => html`<span>✓ ${f.name}</span>`));
+});
+
+/** List of uploaded documents. With `tutorId` (admin view) each item gets a "View" button. */
+export function documentList(docs, tutorId = null) {
+  if (!docs?.length) return html`<p class="small" style="color:var(--danger)">${t('no_documents')}</p>`;
+  return html`<div class="list">${docs.map((d) => html`
+    <div class="list-item" style="padding:8px 0">
+      <span style="font-size:20px">${d.content_type === 'application/pdf' ? '📄' : '🖼️'}</span>
+      <div class="grow"><div class="small bold truncate">${d.name}</div><div class="tiny faint">${fmtDate(d.created_at)}</div></div>
+      ${tutorId ? html`<button class="btn btn-soft btn-sm" data-action="doc-view" data-tutor="${tutorId}" data-id="${d.id}"
+        data-pdf="${d.content_type === 'application/pdf' ? '1' : ''}">${t('view')}</button>` : ''}
+    </div>`)}</div>`;
 }
 
 export { fmtNumber };

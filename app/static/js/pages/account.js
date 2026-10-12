@@ -4,6 +4,7 @@ import {
   setToken, setUser, state, storage, toast, toastError,
 } from '../core.js';
 import { LANGS, getLang, setLang, t } from '../i18n.js';
+import { certificatesError, certificatesField } from './components.js';
 
 const NEXT_KEY = 'tolk_next';
 
@@ -112,6 +113,7 @@ export function renderOnboarding(view) {
             <label class="field"><span>${t('subjects_you_teach')}</span><input class="input" name="subjects" maxlength="255" placeholder="${t('subjects_placeholder')}"></label>
             <label class="field"><span>${t('about_you')}</span><textarea class="textarea" name="bio" maxlength="1500" placeholder="${t('bio_placeholder')}"></textarea>
               <span class="hint">${t('bio_hint')}</span></label>
+            ${certificatesField()}
             <div class="notice notice-info small"><span class="ico">🛡️</span><div>${t('tutor_review_note')}</div></div>
           </div>
           <button class="btn btn-primary btn-lg btn-block" type="submit">${t('finish_sign_up')}</button>
@@ -134,12 +136,18 @@ on('pick-role', (el) => {
 });
 on('onboard', async (form) => {
   const data = formData(form);
-  if (chosenRole === 'tutor' && ((data.bio || '').trim().length < 20 || !(data.subjects || '').trim())) {
-    return toast(t('tutor_fields_required'), 'warning');
+  if (chosenRole === 'tutor') {
+    if ((data.bio || '').trim().length < 20 || !(data.subjects || '').trim()) return toast(t('tutor_fields_required'), 'warning');
+    const certError = certificatesError(form.certificates.files);
+    if (certError) return toast(certError, 'warning');
   }
+  const fd = new FormData();
+  fd.append('role', chosenRole);
+  ['full_name', 'phone', 'subjects', 'bio'].forEach((k) => fd.append(k, data[k] || ''));
+  if (chosenRole === 'tutor') [...form.certificates.files].forEach((f) => fd.append('certificates', f));
   await busy(form.querySelector('[type=submit]'), async () => {
     try {
-      const user = await api('/api/auth/onboarding', { method: 'POST', body: { role: chosenRole, ...data } });
+      const user = await api('/api/auth/onboarding', { method: 'POST', form: fd });
       setUser(user);
       toast(chosenRole === 'tutor' ? t('tutor_application_sent') : t('welcome_aboard'), 'success');
       const next = sessionStorage.getItem(NEXT_KEY);

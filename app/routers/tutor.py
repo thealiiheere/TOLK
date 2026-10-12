@@ -1,6 +1,6 @@
 from datetime import timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
@@ -11,7 +11,7 @@ from app.models import Enrollment, Group, HomeworkSubmission, Lesson, LessonRati
 from app.notify import notify
 from app.schemas import LessonCompleteIn, LessonCreateIn, LessonUpdateIn, StrikeIn
 from app.services import (
-    MAX_STRIKES, aware, enrolled_counts, group_card, group_recipients, iso, lesson_dict, lesson_end, review_dict,
+    MAX_STRIKES, add_tutor_documents, admin_recipients, aware, document_dict, enrolled_counts, group_card, group_recipients, iso, lesson_dict, lesson_end, review_dict,
     tutor_ratings,
 )
 
@@ -60,6 +60,8 @@ def dashboard(tutor: User = Depends(require_tutor), db: DbSession = Depends(get_
     ).all())
     result = {
         "tutor_status": tutor.tutor_status,
+        "tutor_review_note": tutor.tutor_review_note or "",
+        "documents": [document_dict(d) for d in tutor.documents],
         "rating": rating[0] if rating else None,
         "ratings_count": rating[1] if rating else 0,
         "rating_breakdown": {s: int(breakdown.get(s, 0)) for s in range(5, 0, -1)},
@@ -106,6 +108,28 @@ def dashboard(tutor: User = Depends(require_tutor), db: DbSession = Depends(get_
     titles = {g.id: g.title for g in groups}
     result["reviews"] = [review_dict(r, titles.get(r.lesson.group_id)) for r in reviews]
     return result
+
+
+@router.get("/documents")
+def my_documents(tutor: User = Depends(require_tutor)):
+    return [document_dict(d) for d in tutor.documents]
+
+
+@router.post("/documents")
+async def upload_documents(
+    background: BackgroundTasks,
+    certificates: list[UploadFile] = File(default=[]),
+    tutor: User = Depends(require_tutor),
+    db: DbSession = Depends(get_db),
+):
+    """Add certificates. A rejected teacher who uploads new documents goes back to the review queue."""
+    docs = await add_tutor_documents(db, tutor, certificates)
+    if tutor.tutor_status == "rejected":
+        tutor.tutor_status = "pending"
+    db.commit()
+    if tutor.tutor_status == "pending":
+        background.add_task(notify, admin_recipients(db), "n_admin_tutor_docs", name=tutor.full_name, n=len(docs))
+    return {"tutor_status": tutor.tutor_status, "documents": [document_dict(d) for d in tutor.documents]}
 
 
 @router.get("/groups/{group_id}/students")

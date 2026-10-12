@@ -34,6 +34,7 @@ class User(Base):
     bio: Mapped[str] = mapped_column(Text, default="")
     tutor_subjects: Mapped[str] = mapped_column(String(255), default="")
     tutor_status: Mapped[str | None] = mapped_column(String(16))  # pending / approved / rejected
+    tutor_review_note: Mapped[str] = mapped_column(String(500), default="", server_default="")  # admin's reason
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -41,6 +42,22 @@ class User(Base):
     __table_args__ = (CheckConstraint("role IN ('student','tutor','admin')", name="ck_users_role"),)
 
     enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="student", cascade="all, delete-orphan")
+    documents: Mapped[list["TutorDocument"]] = relationship(
+        back_populates="tutor", cascade="all, delete-orphan", order_by="TutorDocument.id"
+    )
+
+
+class TutorDocument(Base):
+    """A certificate / diploma a teacher uploads to prove their qualification. Private: admins only."""
+    __tablename__ = "tutor_documents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tutor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    filename: Mapped[str] = mapped_column(String(64))  # stored name on disk (random)
+    original_name: Mapped[str] = mapped_column(String(160), default="")  # sanitized, for display only
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    tutor: Mapped[User] = relationship(back_populates="documents")
 
 
 class Session(Base):

@@ -116,6 +116,7 @@ class PaymentReviewIn(BaseModel):
 
 class TutorDecisionIn(BaseModel):
     status: Literal["approved", "rejected"]
+    comment: str = Field(default="", max_length=500)  # reason shown to the teacher (mainly for rejections)
 
 
 class BlockIn(BaseModel):

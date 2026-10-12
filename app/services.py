@@ -7,10 +7,16 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
+from fastapi import UploadFile
+
 from app.config import settings
-from app.models import Enrollment, Group, Lesson, LessonRating, User, utcnow
+from app.i18n import ApiError
+from app.models import Enrollment, Group, Lesson, LessonRating, TutorDocument, User, utcnow
+from app.uploads import CERTIFICATES, display_name, media_type, read_upload, write_upload
 
 MAX_STRIKES = 3
+MAX_DOCS_PER_UPLOAD = 5
+MAX_DOCS_TOTAL = 10
 
 
 # ---------- datetime helpers ----------
@@ -76,6 +82,28 @@ def group_recipients(db: DbSession, group_id: int) -> list[tuple[int | None, str
     return [(tid, lang) for tid, lang in rows if tid]
 
 
+# ---------- teacher certificates ----------
+
+async def add_tutor_documents(db: DbSession, tutor: User, files: list[UploadFile]) -> list[TutorDocument]:
+    """Validate every file first, then store them all (so a bad file never leaves half an upload behind)."""
+    files = [f for f in files if f is not None and f.filename]
+    if not files:
+        raise ApiError("certificates_required")
+    if len(files) > MAX_DOCS_PER_UPLOAD or len(tutor.documents) + len(files) > MAX_DOCS_TOTAL:
+        raise ApiError("too_many_documents", per_upload=MAX_DOCS_PER_UPLOAD, total=MAX_DOCS_TOTAL)
+    validated = [(f, *await read_upload(f, "certificates_required")) for f in files]
+    docs = []
+    for f, data, ext in validated:
+        doc = TutorDocument(filename=write_upload(CERTIFICATES, data, ext), original_name=display_name(f.filename))
+        tutor.documents.append(doc)  # keeps the already-loaded collection in sync (sessions don't expire on commit)
+        docs.append(doc)
+    return docs
+
+
+def document_dict(d: TutorDocument) -> dict:
+    return {"id": d.id, "name": d.original_name, "content_type": media_type(d.filename), "created_at": iso(d.created_at)}
+
+
 # ---------- serializers ----------
 
 def user_me(u: User) -> dict:
@@ -91,6 +119,7 @@ def user_me(u: User) -> dict:
         "bio": u.bio or "",
         "subjects": u.tutor_subjects or "",
         "tutor_status": u.tutor_status,
+        "tutor_review_note": u.tutor_review_note or "",
         "is_demo": u.is_demo,
     }
 

@@ -1,10 +1,11 @@
+import io
 from datetime import timedelta
 
 from sqlalchemy import update
 
 from app.database import SessionLocal
 from app.models import Lesson, utcnow
-from tests.conftest import ADMIN_TG_ID, Api, receipt
+from tests.conftest import ADMIN_TG_ID, PNG, Api, receipt
 
 SOON = lambda **kw: (utcnow() + timedelta(**kw)).isoformat()  # noqa: E731
 
@@ -15,17 +16,22 @@ def make_admin(client):
 
 def make_tutor(client, admin, tg_id=2000, name="Teacher One"):
     tutor = Api(client, tg_id, name)
-    res = tutor.post("/api/auth/onboarding", json={
+    res = tutor.post("/api/auth/onboarding", data={
         "role": "tutor", "full_name": name, "subjects": "English", "bio": "I have taught English for five years.",
-    })
+    }, files=certificates())
     assert res.status_code == 200 and res.json()["tutor_status"] == "pending"
     assert admin.post(f"/api/admin/tutors/{tutor.user['id']}/decision", json={"status": "approved"}).status_code == 200
     return tutor
 
 
+def certificates(*names):
+    """Multipart file list for the onboarding / documents endpoints."""
+    return [("certificates", (n, io.BytesIO(PNG), "image/png")) for n in (names or ("ielts.png",))]
+
+
 def make_student(client, tg_id=3000, name="Student One"):
     student = Api(client, tg_id, name)
-    assert student.post("/api/auth/onboarding", json={"role": "student", "full_name": name}).status_code == 200
+    assert student.post("/api/auth/onboarding", data={"role": "student", "full_name": name}).status_code == 200
     return student
 
 
@@ -89,11 +95,12 @@ def test_role_guards(client):
 def test_tutor_must_be_approved_and_profile_complete(client):
     admin = make_admin(client)
     t = Api(client, 2100, "Short")
-    res = t.post("/api/auth/onboarding", json={"role": "tutor", "full_name": "Short", "subjects": "", "bio": "hi"})
+    res = t.post("/api/auth/onboarding", data={"role": "tutor", "full_name": "Short", "subjects": "", "bio": "hi"},
+                 files=certificates())
     assert res.json()["code"] == "tutor_profile_incomplete"
-    t.post("/api/auth/onboarding", json={
+    t.post("/api/auth/onboarding", data={
         "role": "tutor", "full_name": "Short", "subjects": "Math", "bio": "Twenty characters of bio text",
-    })
+    }, files=certificates())
     assert t.get("/api/tutor/dashboard").json()["tutor_status"] == "pending"
     assert t.post("/api/tutor/lessons", json={}).status_code == 403
     # Pending teachers can't be assigned to a class
@@ -308,3 +315,76 @@ def test_receipt_upload_validation(client):
     fake = {"receipt": ("evil.png", io.BytesIO(b"<script>alert(1)</script>"), "image/png")}
     assert student.post("/api/student/enroll", data={"group_id": group_id}, files=fake).json()["code"] == "receipt_bad_type"
     assert student.post("/api/student/enroll", data={"group_id": group_id}).json()["code"] == "receipt_required"
+
+
+# ---------- teacher certificates ----------
+
+def tutor_application(client, tg_id=2500, files=None):
+    t = Api(client, tg_id, "Applicant")
+    body = {"role": "tutor", "full_name": "Applicant", "subjects": "IELTS", "bio": "IELTS 8.0, three years of teaching."}
+    return t, t.post("/api/auth/onboarding", data=body, files=files if files is not None else certificates())
+
+
+def test_teacher_sign_up_requires_certificate(client):
+    t, res = tutor_application(client, files=[])
+    assert res.json()["code"] == "certificates_required"
+    assert t.get("/api/auth/me").json()["onboarded"] is False  # nothing was saved
+    fake = [("certificates", ("cert.png", io.BytesIO(b"<html>not an image</html>"), "image/png"))]
+    t, res = tutor_application(client, tg_id=2501, files=fake)
+    assert res.json()["code"] == "receipt_bad_type"
+    t, res = tutor_application(client, tg_id=2502, files=certificates(*[f"c{i}.png" for i in range(6)]))
+    assert res.json()["code"] == "too_many_documents"
+    t, res = tutor_application(client, tg_id=2503, files=certificates("diploma.png", "../../etc/ielts.png"))
+    assert res.status_code == 200 and res.json()["tutor_status"] == "pending"
+    assert [d["name"] for d in t.get("/api/tutor/documents").json()] == ["diploma.png", "ielts.png"]
+
+
+def test_admin_reviews_documents_and_rejects_with_reason(client, fresh_db):
+    sent = fresh_db
+    admin = make_admin(client)
+    t, _ = tutor_application(client)
+    applicant = next(x for x in admin.get("/api/admin/tutors").json() if x["id"] == t.user["id"])
+    doc = applicant["documents"][0]
+    assert doc["content_type"] == "image/png"
+    url = f"/api/admin/tutors/{t.user['id']}/documents/{doc['id']}"
+    file = admin.get(url)
+    assert file.status_code == 200 and file.content == PNG and file.headers["cache-control"] == "private, no-store"
+    assert t.get(url).status_code == 403  # documents are admin-only
+    assert admin.get(f"/api/admin/tutors/{t.user['id'] + 1}/documents/{doc['id']}").status_code == 404
+
+    res = admin.post(f"/api/admin/tutors/{t.user['id']}/decision", json={"status": "rejected", "comment": "Blurry scan"})
+    assert res.status_code == 200
+    me = t.get("/api/auth/me").json()
+    assert me["tutor_status"] == "rejected" and me["tutor_review_note"] == "Blurry scan"
+    assert any("Blurry scan" in text for _, text in sent)
+
+    # Uploading new documents re-applies
+    res = t.post("/api/tutor/documents", files=certificates("clear-scan.png"))
+    assert res.status_code == 200 and res.json()["tutor_status"] == "pending" and len(res.json()["documents"]) == 2
+    assert admin.post(f"/api/admin/tutors/{t.user['id']}/decision", json={"status": "approved"}).status_code == 200
+    assert t.get("/api/auth/me").json()["tutor_status"] == "approved"
+
+
+def test_teacher_without_documents_cannot_be_approved(client):
+    from app.models import TutorDocument, User
+    from sqlalchemy import delete, select
+
+    admin = make_admin(client)
+    t, _ = tutor_application(client)
+    with SessionLocal() as db:  # e.g. a teacher who signed up before certificates were required
+        db.execute(delete(TutorDocument).where(TutorDocument.tutor_id == t.user["id"]))
+        db.commit()
+    res = admin.post(f"/api/admin/tutors/{t.user['id']}/decision", json={"status": "approved"})
+    assert res.json()["code"] == "tutor_no_documents"
+    with SessionLocal() as db:
+        assert db.scalar(select(User.tutor_status).where(User.id == t.user["id"])) == "pending"
+
+
+def test_admin_id_added_while_signed_in_is_applied(client, monkeypatch):
+    from app.config import settings
+
+    user = make_student(client, tg_id=4242)
+    assert user.get("/api/admin/stats").status_code == 403
+    monkeypatch.setattr(type(settings), "admin_ids", property(lambda self: {1000, 4242}))
+    assert user.get("/api/auth/me").json()["role"] == "admin"
+    assert user.get("/api/admin/stats").status_code == 200

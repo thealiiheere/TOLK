@@ -1,4 +1,6 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from sqlalchemy import case, select
 from sqlalchemy.orm import Session as DbSession
 
@@ -12,7 +14,7 @@ from app.i18n import ApiError
 from app.models import User
 from app.notify import notify
 from app.schemas import DemoLoginIn, OnboardingIn, ProfileUpdateIn, TelegramAuthIn, TelegramWidgetIn
-from app.services import admin_recipients, user_me
+from app.services import add_tutor_documents, admin_recipients, user_me
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -75,17 +77,32 @@ def me(user: User = Depends(get_current_user)):
 
 
 @router.post("/onboarding")
-def onboarding(
-    body: OnboardingIn,
+async def onboarding(
     background: BackgroundTasks,
+    role: str = Form(...),
+    full_name: str = Form(...),
+    phone: str = Form(""),
+    bio: str = Form(""),
+    subjects: str = Form(""),
+    certificates: list[UploadFile] = File(default=[]),
     user: User = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ):
-    """First-time sign-up: the user picks Student or Teacher. Teachers wait for admin approval."""
+    """First-time sign-up (multipart form): the user picks Student or Teacher.
+
+    Teachers must attach at least one certificate / diploma and then wait for admin approval.
+    """
+    # (A Form() model can't be combined with File() params in FastAPI, so the model is built here.)
+    try:
+        body = OnboardingIn(role=role, full_name=full_name, phone=phone, bio=bio, subjects=subjects)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from None
     if user.onboarded:
         raise ApiError("already_onboarded", 409)
-    if body.role == "tutor" and (len(body.bio) < 20 or not body.subjects):
-        raise ApiError("tutor_profile_incomplete")
+    if body.role == "tutor":
+        if len(body.bio) < 20 or not body.subjects:
+            raise ApiError("tutor_profile_incomplete")
+        docs = await add_tutor_documents(db, user, certificates)  # validates before anything is saved
     user.full_name = body.full_name
     user.phone = body.phone or None
     user.role = body.role
@@ -96,7 +113,7 @@ def onboarding(
         user.tutor_status = "pending"
     db.commit()
     if body.role == "tutor":
-        background.add_task(notify, admin_recipients(db), "n_admin_tutor", name=user.full_name)
+        background.add_task(notify, admin_recipients(db), "n_admin_tutor", name=user.full_name, n=len(docs))
     return user_me(user)
 
 

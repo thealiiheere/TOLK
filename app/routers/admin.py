@@ -8,12 +8,14 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from app.auth import require_admin
 from app.database import get_db
 from app.i18n import ApiError
-from app.models import Enrollment, Group, Lesson, LessonRating, Payment, Session, User, utcnow
+from app.models import Enrollment, Group, Lesson, LessonRating, Payment, Session, TutorDocument, User, utcnow
 from app.notify import notify
 from app.routers.tutor import apply_strike
 from app.schemas import AssignStudentIn, BlockIn, GroupIn, PaymentReviewIn, StrikeIn, TutorDecisionIn
-from app.services import MAX_STRIKES, enrolled_counts, group_card, iso, tutor_card, tutor_ratings, user_brief
-from app.uploads import MEDIA_TYPES, receipt_path
+from app.services import (
+    MAX_STRIKES, document_dict, enrolled_counts, group_card, iso, tutor_card, tutor_ratings, user_brief,
+)
+from app.uploads import CERTIFICATES, MEDIA_TYPES, media_type, receipt_path, stored_path
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -233,7 +235,9 @@ def remove_student(group_id: int, student_id: int, _: User = Depends(require_adm
 
 @router.get("/tutors")
 def list_tutors(_: User = Depends(require_admin), db: DbSession = Depends(get_db)):
-    tutors = db.scalars(select(User).where(User.role == "tutor").order_by(User.id.desc())).all()
+    tutors = db.scalars(
+        select(User).where(User.role == "tutor").options(selectinload(User.documents)).order_by(User.id.desc())
+    ).all()
     ratings = tutor_ratings(db, [t.id for t in tutors])
     group_counts = dict(db.execute(
         select(Group.tutor_id, func.count()).where(Group.tutor_id.is_not(None)).group_by(Group.tutor_id)
@@ -248,9 +252,20 @@ def list_tutors(_: User = Depends(require_admin), db: DbSession = Depends(get_db
             "is_blocked": t.is_blocked,
             "groups_count": group_counts.get(t.id, 0),
             "created_at": iso(t.created_at),
+            "review_note": t.tutor_review_note or "",
+            "documents": [document_dict(d) for d in t.documents],
         }
         for t in tutors
     ]
+
+
+@router.get("/tutors/{tutor_id}/documents/{doc_id}")
+def tutor_document(tutor_id: int, doc_id: int, _: User = Depends(require_admin), db: DbSession = Depends(get_db)):
+    doc = db.get(TutorDocument, doc_id)
+    path = stored_path(CERTIFICATES, doc.filename) if doc is not None and doc.tutor_id == tutor_id else None
+    if path is None:
+        raise ApiError("document_not_found", 404)
+    return FileResponse(path, media_type=media_type(path.name), headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/tutors/{tutor_id}/decision")
@@ -261,10 +276,15 @@ def tutor_decision(
     tutor = db.get(User, tutor_id)
     if tutor is None or tutor.role != "tutor":
         raise ApiError("tutor_not_found", 404)
+    if body.status == "approved" and not tutor.documents:
+        raise ApiError("tutor_no_documents")
     tutor.tutor_status = body.status
+    tutor.tutor_review_note = body.comment.strip()
     db.commit()
-    key = "n_tutor_approved" if body.status == "approved" else "n_tutor_rejected"
-    background.add_task(notify, _recipient(tutor), key)
+    if body.status == "approved":
+        background.add_task(notify, _recipient(tutor), "n_tutor_approved")
+    else:
+        background.add_task(notify, _recipient(tutor), "n_tutor_rejected", reason=tutor.tutor_review_note)
     return {"ok": True}
 
 

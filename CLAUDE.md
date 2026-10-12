@@ -2,7 +2,7 @@
 
 Education marketplace (startup MVP) connecting students and teachers: small online groups for languages and
 "other" subjects. Runs as a Telegram Mini App + normal browser. UI languages: **uz (default), ru, en**.
-Roles: `student`, `tutor` (shown as "teacher" in the UI), `admin`. Deployed with Docker Compose on AWS EC2 (see DEPLOY.md).
+Roles: `student`, `tutor` (shown as "teacher" in the UI), `admin`. Production: AWS EC2 with systemd + nginx (see "Production" below).
 
 ## Stack
 
@@ -32,26 +32,30 @@ alembic upgrade head
 app/
   config.py      Settings (pydantic-settings, reads .env). All env vars live here. config_warnings() logged at startup.
   database.py    engine, SessionLocal, Base, get_db (SQLite pragmas: FK on, WAL)
-  models.py      ORM: User, Session, Group, Enrollment(table group_students), Payment, Lesson, LessonRecord,
-                 LessonRating, HomeworkSubmission
+  models.py      ORM: User, TutorDocument, Session, Group, Enrollment(table group_students), Payment, Lesson,
+                 LessonRecord, LessonRating, HomeworkSubmission
   schemas.py     Pydantic request bodies + validators (meeting-link host allow-list, http URLs, language code)
-  services.py    shared queries (tutor_ratings, enrolled_counts, notification recipients) + dict serializers
-                 (user_me, group_card, tutor_card, lesson_dict, review_dict). API response shapes live HERE.
+  services.py    shared queries (tutor_ratings, enrolled_counts, notification recipients), add_tutor_documents,
+                 + dict serializers (user_me, group_card, tutor_card, lesson_dict, review_dict, document_dict).
+                 API response shapes live HERE.
   auth.py        Telegram signature checks, upsert_telegram_user, sessions, guards:
                  get_current_user → require_onboarded → require_admin / require_tutor / require_approved_tutor / require_student
   i18n.py        backend strings (API errors, Telegram notifications, bot welcome) in uz/ru/en; ApiError("key", status, **params)
   notify.py      best-effort Telegram messages via BackgroundTasks (never raises)
-  uploads.py     receipt storage: magic-byte type check, size limit, random names, private (admin-only download)
+  uploads.py     private file storage (upload_dir/receipts, upload_dir/certificates): magic-byte type check, size limit,
+                 random names, read_upload() validates before write_upload(); admin-only download endpoints
   seed.py        demo data (+ generated receipt images)
   main.py        app, error handlers (translate ApiError/validation via X-Lang), security headers + CSP,
                  /api/config, /health, static mount, index
   routers/
-    auth.py      /api/auth: telegram, telegram-widget, demo-users, demo-login, me (GET/PATCH), onboarding, logout
+    auth.py      /api/auth: telegram, telegram-widget, demo-users, demo-login, me (GET/PATCH), logout,
+                 onboarding (MULTIPART form: role, full_name, phone, bio, subjects, certificates[])
     catalog.py   /api/catalog (public): filters, groups (filters+sort), groups/{id}, tutors/{id}
     student.py   /api/student: dashboard, enroll (multipart receipt), lessons/{id}/rate, homework
-    tutor.py     /api/tutor: dashboard, groups/{id}/students, lessons (POST/PATCH), lessons/{id}/cancel|complete, strikes
+    tutor.py     /api/tutor: dashboard, documents (GET/POST multipart), groups/{id}/students, lessons (POST/PATCH),
+                 lessons/{id}/cancel|complete, strikes
     admin.py     /api/admin: stats, payments (+receipt, review), groups CRUD (+students add/remove),
-                 tutors (+decision), users (+block), violations, strikes
+                 tutors (+decision with comment, +documents/{doc_id} file), users (+block), violations, strikes
   static/
     index.html   shell only (appbar, #view, tabbar, #toasts)
     css/app.css  design tokens on :root, dark theme via [data-theme=dark] (synced with Telegram colorScheme)
@@ -61,7 +65,7 @@ app/
     js/app.js    boot (Telegram init, theme, session restore), routes table, top bar + bottom tab bar
     js/pages/    explore.js (catalog+filters), class.js (class page, teacher page, enroll sheet),
                  account.js (login, onboarding, profile), student.js, tutor.js, admin.js, components.js (shared blocks)
-alembic/versions/   migrations (0001_initial_schema = current full schema)
+alembic/versions/   migrations: 0001_initial_schema, 0002_tutor_documents
 tests/              conftest.py (env, signed initData helper, Api client wrapper), test_api.py
 telegram_bot.py     long-polling bot: /start → welcome + Mini App button, sets menu button. Separate process/container.
 docker-compose.yml  caddy (HTTPS) + web + bot + db; Dockerfile + docker-entrypoint.sh (web: migrate, seed if demo, uvicorn)
@@ -82,8 +86,13 @@ docker-compose.yml  caddy (HTTPS) + web + bot + db; Dockerfile + docker-entrypoi
   tutor hasn't completed it), within 14 days, not cancelled, student not marked absent, and student enrolled
   (or has a record). Tutor rating = average of all their `LessonRating`s; drives catalog sort and `min_rating` filter.
 - **3-strike rule**: `Enrollment.strikes` (max 3). At 3, the student no longer receives lesson links and can't submit homework.
-- **Teacher sign-up**: onboarding with role `tutor` requires subjects + bio ≥ 20 chars → `tutor_status="pending"`;
-  admin approves/rejects. Users in `ADMIN_TELEGRAM_IDS` become admin on every sign-in.
+- **Teacher sign-up / verification**: onboarding with role `tutor` requires subjects + bio ≥ 20 chars + **at least one
+  certificate** (JPG/PNG/WEBP/PDF, ≤ 5 per upload, ≤ 10 total) → `tutor_status="pending"`. Documents are private
+  (`TutorDocument`, `upload_dir/certificates`), only admins can open them. Admin **cannot approve without documents**
+  (`tutor_no_documents`); rejection stores `User.tutor_review_note` (sent to the teacher). A rejected teacher who
+  uploads new documents (`POST /api/tutor/documents`) goes back to `pending`.
+- **Admins**: users in `ADMIN_TELEGRAM_IDS` are promoted at sign-in AND on their next authenticated request
+  (`auth.get_current_user_optional`), so editing the env var + restarting is enough.
 - **Blocking** a user deletes their sessions; blocked users get 403 `account_blocked`.
 
 ## Conventions
@@ -110,6 +119,20 @@ docker-compose.yml  caddy (HTTPS) + web + bot + db; Dockerfile + docker-entrypoi
   admin form `groupForm` (pages/admin.js) → display in components.js / class.js.
 - **New page**: `route('/path', handler, {tab, role|auth, back})` in app.js; handler `(view, params, query, alive)`.
 - **New notification**: add `n_*` key to `app/i18n.py`, call `background.add_task(notify, recipients, "n_key", **params)`.
+
+## Production (AWS EC2, Ubuntu 26.04) — no Docker in use there
+
+- URL: https://100-29-35-38.sslip.io (sslip.io hostname → Let's Encrypt cert via certbot, auto-renew timer).
+  Bare IP and http redirect to it. Bot: @tolkplatformbot.
+- Code `/srv/tolk` (git clone of `main`, owned by system user `tolk`), venv `/srv/tolk/.venv`,
+  uploads `/srv/tolk/data/uploads`, settings `/srv/tolk/.env` (mode 600; secrets generated on the server — never print).
+- systemd: `tolk-web` (uvicorn 127.0.0.1:8000, 2 workers, `alembic upgrade head` in ExecStartPre) and `tolk-bot`.
+- nginx site `/etc/nginx/sites-available/tolk` (proxy + X-Forwarded-*, 12 MB body limit). PostgreSQL 18 local,
+  role/db `tolk`. ufw allows OpenSSH + Nginx Full. 1 GB swap (instance has ~0.9 GB RAM).
+- Deploy: `ssh ubuntu@100.29.35.38 "cd /srv/tolk && sudo -u tolk git pull --ff-only && sudo -u tolk .venv/bin/pip install -q -r requirements.txt && sudo systemctl restart tolk-web tolk-bot"`
+- Logs: `sudo journalctl -u tolk-web -f` / `-u tolk-bot`; nginx in `/var/log/nginx/`.
+- Change settings: edit `/srv/tolk/.env` with sudo, then `sudo systemctl restart tolk-web tolk-bot`.
+- DEPLOY.md / docker-compose.yml describe an alternative Docker setup that is NOT what runs in production.
 
 ## Gotchas
 

@@ -187,6 +187,22 @@ MESSAGES: dict[str, dict[str, str]] = {
         "ru": "Нельзя заблокировать администратора",
         "en": "Administrators can't be blocked",
     },
+    "certificates_required": {
+        "uz": "Kamida bitta sertifikat yoki diplom yuklang (JPG, PNG, WEBP yoki PDF)",
+        "ru": "Загрузите хотя бы один сертификат или диплом (JPG, PNG, WEBP или PDF)",
+        "en": "Upload at least one certificate or diploma (JPG, PNG, WEBP or PDF)",
+    },
+    "too_many_documents": {
+        "uz": "Bir martada {per_upload} tagacha, jami {total} tagacha hujjat yuklash mumkin",
+        "ru": "Можно загрузить до {per_upload} файлов за раз и до {total} всего",
+        "en": "You can upload up to {per_upload} files at a time and {total} in total",
+    },
+    "tutor_no_documents": {
+        "uz": "O'qituvchi hech qanday sertifikat yuklamagan — tasdiqlab bo'lmaydi",
+        "ru": "Преподаватель не загрузил ни одного сертификата — одобрить нельзя",
+        "en": "This teacher hasn't uploaded any certificates, so they can't be approved",
+    },
+    "document_not_found": {"uz": "Hujjat topilmadi", "ru": "Документ не найден", "en": "Document not found"},
     "invalid_language_code": {
         "uz": "Til kursi uchun tilni ro'yxatdan tanlang",
         "ru": "Для языкового курса выберите язык из списка",
@@ -251,9 +267,9 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": "🎉 Your teacher application was approved! The admin will assign classes to you.",
     },
     "n_tutor_rejected": {
-        "uz": "Afsuski, o'qituvchi arizangiz rad etildi.",
-        "ru": "К сожалению, ваша заявка преподавателя отклонена.",
-        "en": "Unfortunately, your teacher application was declined.",
+        "uz": "Afsuski, o'qituvchi arizangiz rad etildi. {reason}\nIlovada yangi hujjatlarni yuklab, qayta ariza berishingiz mumkin.",
+        "ru": "К сожалению, ваша заявка преподавателя отклонена. {reason}\nВы можете загрузить новые документы в приложении и подать заявку снова.",
+        "en": "Unfortunately, your teacher application was declined. {reason}\nYou can upload new documents in the app to apply again.",
     },
     "n_group_assigned": {
         "uz": "📚 Sizga yangi guruh biriktirildi: «{group}».",
@@ -266,9 +282,14 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": "💳 New payment: {student} — «{group}», {amount} UZS",
     },
     "n_admin_tutor": {
-        "uz": "🎓 Yangi o'qituvchi arizasi: {name}",
-        "ru": "🎓 Новая заявка преподавателя: {name}",
-        "en": "🎓 New teacher application: {name}",
+        "uz": "🎓 Yangi o'qituvchi arizasi: {name} ({n} ta hujjat)",
+        "ru": "🎓 Новая заявка преподавателя: {name} (документов: {n})",
+        "en": "🎓 New teacher application: {name} ({n} documents)",
+    },
+    "n_admin_tutor_docs": {
+        "uz": "📎 {name} {n} ta yangi hujjat yukladi — tekshiring",
+        "ru": "📎 {name}: загружены новые документы ({n}) — проверьте",
+        "en": "📎 {name} uploaded {n} new document(s) — please review",
     },
     "open_app": {"uz": "TOLK ni ochish", "ru": "Открыть TOLK", "en": "Open TOLK"},
     # --- bot ---

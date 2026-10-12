@@ -16,9 +16,9 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.models import (
-    Enrollment, Group, HomeworkSubmission, Lesson, LessonRating, LessonRecord, Payment, User, utcnow,
+    Enrollment, Group, HomeworkSubmission, Lesson, LessonRating, LessonRecord, Payment, TutorDocument, User, utcnow,
 )
-from app.uploads import receipts_dir
+from app.uploads import CERTIFICATES, receipts_dir, upload_dir
 
 TUTORS = [
     ("Alisher Karimov", "en,ru", "IELTS 8.0, 4 years of teaching speaking clubs. Business English and exam prep."),
@@ -69,6 +69,20 @@ def _receipt(name: str, amount: int) -> str:
     return filename
 
 
+def _certificate(name: str, subject: str) -> str:
+    """Draw a simple fake certificate for demo teachers (the admin review screen shows it)."""
+    filename = f"demo_cert_{abs(hash((name, subject))) % 10**8}.png"
+    path = upload_dir(CERTIFICATES) / filename
+    if not path.exists():
+        img = Image.new("RGB", (560, 400), (250, 247, 238))
+        d = ImageDraw.Draw(img)
+        d.rectangle((12, 12, 548, 388), outline=(180, 140, 60), width=4)
+        for i, line in enumerate(["CERTIFICATE", "", f"awarded to {name}", f"for excellence in {subject}", "", "DEMO DATA"]):
+            d.text((60, 70 + i * 40), line, fill=(60, 50, 30))
+        img.save(path)
+    return filename
+
+
 def seed(db) -> bool:
     if db.scalar(select(User.id).where(User.is_demo.is_(True)).limit(1)):
         return False
@@ -87,6 +101,8 @@ def seed(db) -> bool:
              telegram_username=f"@demo_student{i + 1}", lang="en")
         for i, n in enumerate(STUDENTS)
     ]
+    for t in [*tutors, pending]:
+        t.documents.append(TutorDocument(filename=_certificate(t.full_name, t.tutor_subjects), original_name="certificate.png"))
     db.add_all([admin, *tutors, pending, *students])
     db.flush()
 
