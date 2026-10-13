@@ -1,6 +1,6 @@
 // Admin panel: overview, payments (receipts), classes (create / edit / students), teachers, users, discipline.
 import {
-  api, avatar, busy, confirmSheet, empty, errorBox, fmtDate, fmtDateTime, fmtPrice, formData, go, html, icon, loading,
+  api, avatar, busy, codeBadge, confirmSheet, empty, errorBox, fmtDate, fmtDateTime, fmtPrice, formData, go, html, icon, loading,
   mount, on, openSheet, periodLabel, ratingBadge, strikesDots, subjectIcon, subjectInfo, toast, toastError,
 } from '../core.js';
 import { LANGUAGE_CODES, subjectName, t } from '../i18n.js';
@@ -79,7 +79,7 @@ async function payments(body, query, alive) {
         <div class="grow" style="min-width:200px">
           <div class="between"><div class="bold">${p.student.full_name}</div>${paymentStatus(p.status)}</div>
           <div class="tiny muted">${[p.student.phone, p.student.telegram_username].filter(Boolean).join(' · ')}</div>
-          <div class="small mt" style="margin-top:6px">${p.group ? html`<a href="#/class/${p.group.id}">${p.group.title}</a>` : html`<span class="faint">${t('class_deleted')}</span>`}
+          <div class="small mt" style="margin-top:6px">${p.group ? html`${codeBadge(p.group.code)} <a href="#/class/${p.group.id}">${p.group.title}</a>` : html`<span class="faint">${t('class_deleted')}</span>`}
             ${p.group && p.status === 'pending' ? html` · <span class="${p.group.seats_left ? '' : 'bold'}" style="${p.group.seats_left ? '' : 'color:var(--danger)'}">${t('seats_left', { n: p.group.seats_left })}</span>` : ''}</div>
           <div class="row-wrap small" style="margin-top:4px"><b>${fmtPrice(p.amount)}</b>
             ${p.group && p.group.price !== p.amount ? html`<span class="badge badge-warning">${t('price_changed', { price: fmtPrice(p.group.price) })}</span>` : ''}
@@ -150,7 +150,7 @@ async function classes(body, _query, alive) {
     ${groups.length ? html`<div class="grid grid-2">${groups.map((g) => {
       const s = subjectInfo(g);
       return html`<div class="card card-pad stack">
-        <div class="row">${subjectIcon(s)}<div class="grow"><a class="bold" href="#/class/${g.id}">${g.title}</a>
+        <div class="row">${subjectIcon(s)}<div class="grow">${codeBadge(g.code)} <a class="bold" href="#/class/${g.id}">${g.title}</a>
           <div class="tiny muted">${s.label}${g.level ? ` · ${g.level}` : ''}</div></div>
           ${g.is_published ? html`<span class="badge badge-success">${t('published')}</span>` : html`<span class="badge">${t('hidden')}</span>`}</div>
         ${g.tutor ? html`<div class="row small">${avatar(g.tutor, 'avatar-sm')}<span class="grow truncate">${g.tutor.full_name}</span>${ratingBadge(g.tutor)}</div>`
@@ -176,6 +176,10 @@ async function groupForm(group = null) {
     wide: true,
     body: html`<form class="form-grid" data-submit="group-save" data-id="${group?.id || ''}">
       <label class="field full"><span>${t('class_title')}</span><input class="input" name="title" required minlength="2" maxlength="160" value="${g.title || ''}" placeholder="${t('class_title_placeholder')}"></label>
+      <label class="field full"><span>${t('course_code')} <span class="faint">(${t('optional')})</span></span>
+        <input class="input mono" name="code" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9\-]{1,19}" style="text-transform:uppercase"
+          value="${g.code || ''}" placeholder="${t('course_code_placeholder')}" autocomplete="off">
+        <span class="hint">${group ? t('course_code_hint_edit') : t('course_code_hint')}</span></label>
       <div class="field full"><span>${t('category')}</span><div class="seg block" data-category>
         <button type="button" class="${g.category === 'language' ? 'active' : ''}" data-action="cat-pick" data-v="language">🗣️ ${t('cat_language')}</button>
         <button type="button" class="${g.category === 'other' ? 'active' : ''}" data-action="cat-pick" data-v="other">📘 ${t('cat_other')}</button></div>
@@ -216,6 +220,7 @@ on('group-save', async (form) => {
   const subject = d.category === 'language' ? d.subject_lang : (d.subject_other || '').trim();
   if (!subject) return toast(t('subject_required'), 'warning');
   const body = {
+    code: (d.code || '').trim().toUpperCase(),
     title: d.title, category: d.category, subject, level: d.level, description: d.description,
     price: Number(d.price), price_period: d.price_period, schedule: d.schedule, max_students: Number(d.max_students),
     tutor_id: d.tutor_id ? Number(d.tutor_id) : null, is_published: form.is_published.checked,

@@ -13,7 +13,8 @@ from app.notify import notify
 from app.routers.tutor import apply_strike
 from app.schemas import AssignStudentIn, BlockIn, GroupIn, PaymentReviewIn, StrikeIn, TutorDecisionIn
 from app.services import (
-    MAX_STRIKES, document_dict, enrolled_counts, group_card, iso, tutor_card, tutor_ratings, user_brief,
+    MAX_STRIKES, document_dict, enrolled_counts, ensure_course_code_free, generate_course_code, group_card, iso,
+    tutor_card, tutor_ratings, user_brief,
 )
 from app.uploads import CERTIFICATES, MEDIA_TYPES, media_type, receipt_path, stored_path
 
@@ -90,7 +91,7 @@ def list_payments(
             "receipt_type": MEDIA_TYPES.get("." + p.receipt_filename.rsplit(".", 1)[-1], "application/octet-stream"),
             "student": {**user_brief(p.student), "phone": p.student.phone or ""},
             "group": {
-                "id": p.group.id, "title": p.group.title, "price": p.group.price,
+                "id": p.group.id, "code": p.group.code, "title": p.group.title, "price": p.group.price,
                 "seats_left": max(0, p.group.max_students - counts.get(p.group.id, 0)),
             } if p.group else None,
         }
@@ -172,12 +173,17 @@ def create_group(
     body: GroupIn, background: BackgroundTasks, _: User = Depends(require_admin), db: DbSession = Depends(get_db),
 ):
     tutor = _approved_tutor(db, body.tutor_id)
-    group = Group(**body.model_dump())
+    data = body.model_dump()
+    if data["code"]:
+        ensure_course_code_free(db, data["code"])
+    else:
+        data["code"] = generate_course_code(db, body.category, body.subject)
+    group = Group(**data)
     db.add(group)
     db.commit()
     if tutor:
         background.add_task(notify, _recipient(tutor), "n_group_assigned", group=group.title)
-    return {"id": group.id}
+    return {"id": group.id, "code": group.code}
 
 
 @router.put("/groups/{group_id}")
@@ -191,12 +197,17 @@ def update_group(
     tutor = _approved_tutor(db, body.tutor_id) if body.tutor_id != group.tutor_id else None
     if body.max_students < len(group.enrollments):
         raise ApiError("max_below_enrolled", n=len(group.enrollments))
-    for key, value in body.model_dump().items():
+    data = body.model_dump()
+    if not data["code"]:
+        data["code"] = group.code  # empty field on edit = keep the current code
+    elif data["code"] != group.code:
+        ensure_course_code_free(db, data["code"], group.id)
+    for key, value in data.items():
         setattr(group, key, value)
     db.commit()
     if tutor:
         background.add_task(notify, _recipient(tutor), "n_group_assigned", group=group.title)
-    return {"id": group.id}
+    return {"id": group.id, "code": group.code}
 
 
 @router.delete("/groups/{group_id}")

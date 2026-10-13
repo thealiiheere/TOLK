@@ -187,6 +187,16 @@ MESSAGES: dict[str, dict[str, str]] = {
         "ru": "Нельзя заблокировать администратора",
         "en": "Administrators can't be blocked",
     },
+    "invalid_course_code": {
+        "uz": "Kurs kodi: 2–20 ta lotin harfi, raqam yoki «-» (masalan, ENG-101)",
+        "ru": "Код курса: 2–20 латинских букв, цифр или «-» (например, ENG-101)",
+        "en": "Course code: 2–20 Latin letters, digits or \"-\" (e.g. ENG-101)",
+    },
+    "course_code_taken": {
+        "uz": "{code} kodi boshqa kursda ishlatilgan",
+        "ru": "Код {code} уже используется другим курсом",
+        "en": "The code {code} is already used by another class",
+    },
     "certificates_required": {
         "uz": "Kamida bitta sertifikat yoki diplom yuklang (JPG, PNG, WEBP yoki PDF)",
         "ru": "Загрузите хотя бы один сертификат или диплом (JPG, PNG, WEBP или PDF)",

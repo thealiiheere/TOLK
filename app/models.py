@@ -76,6 +76,8 @@ class Group(Base):
     __tablename__ = "groups"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Short public course code (e.g. "ENG-101"), unique, stored uppercase. Auto-generated when the admin leaves it empty.
+    code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
     title: Mapped[str] = mapped_column(String(160))
     category: Mapped[str] = mapped_column(String(16), default="language")  # language / other
     # For category "language": ISO code (en, ru, ko...). For "other": free-text subject (Math, IT...).

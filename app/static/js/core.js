@@ -277,6 +277,11 @@ export function subjectIcon(info, size = 'md') {
     : html`<span class="emoji-mark ${size}">${info.emoji}</span>`;
 }
 
+/** Course code chip, e.g. "EN-101". */
+export function codeBadge(code) {
+  return code ? html`<span class="code-badge" title="${t('course_code')}">${code}</span>` : '';
+}
+
 export function strikesDots(n, max = 3) {
   return html`<span class="strikes ${n >= max ? 'full' : ''}" title="${n}/${max}">${
     Array.from({ length: max }, (_, i) => html`<i class="${i < n ? 'on' : ''}"></i>`)}</span>`;

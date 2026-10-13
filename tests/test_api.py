@@ -388,3 +388,42 @@ def test_admin_id_added_while_signed_in_is_applied(client, monkeypatch):
     monkeypatch.setattr(type(settings), "admin_ids", property(lambda self: {1000, 4242}))
     assert user.get("/api/auth/me").json()["role"] == "admin"
     assert user.get("/api/admin/stats").status_code == 200
+
+
+# ---------- course codes ----------
+
+def test_course_codes_generated_validated_and_searchable(client):
+    admin = make_admin(client)
+    tutor = make_tutor(client, admin)
+    tid = tutor.user["id"]
+    a = make_group(admin, tid, title="Club A")
+    b = make_group(admin, tid, title="Club B")
+    m = make_group(admin, tid, title="SAT", category="other", subject="Mathematics")
+    custom = make_group(admin, tid, title="IELTS Intensive", code=" ielts-7 ")
+    codes = {g["id"]: g["code"] for g in admin.get("/api/admin/groups").json()}
+    assert (codes[a], codes[b], codes[m], codes[custom]) == ("EN-101", "EN-102", "MAT-101", "IELTS-7")
+
+    def create(code):
+        return admin.post("/api/admin/groups", json={
+            "code": code, "title": "Dup", "category": "language", "subject": "en", "price": 1, "tutor_id": tid,
+        })
+
+    taken = create("ielts-7")
+    assert taken.status_code == 409 and taken.json()["code"] == "course_code_taken" and "IELTS-7" in taken.json()["detail"]
+    assert create("bad code!").json()["code"] == "invalid_course_code"
+    assert create("-X").json()["code"] == "invalid_course_code"
+
+    # Editing: empty keeps the code, another class's code is rejected, a new free code is accepted
+    body = {"title": "Club A", "category": "language", "subject": "en", "price": 1, "tutor_id": tid}
+    assert admin.put(f"/api/admin/groups/{a}", json={**body, "code": ""}).json()["code"] == "EN-101"
+    assert admin.put(f"/api/admin/groups/{a}", json={**body, "code": "en-102"}).json()["code"] == "course_code_taken"
+    assert admin.put(f"/api/admin/groups/{a}", json={**body, "code": "ENG-A1"}).json()["code"] == "ENG-A1"
+
+    # Students find classes by code (any case, partial)
+    def found(q):
+        return [g["id"] for g in client.get("/api/catalog/groups", params={"q": q}).json()]
+
+    assert found("ielts-7") == [custom]
+    assert found("eng-a1") == [a]
+    assert set(found("mat-1")) == {m}
+    assert client.get(f"/api/catalog/groups/{a}").json()["code"] == "ENG-A1"

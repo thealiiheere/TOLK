@@ -18,6 +18,7 @@ from app.database import Base, SessionLocal, engine
 from app.models import (
     Enrollment, Group, HomeworkSubmission, Lesson, LessonRating, LessonRecord, Payment, TutorDocument, User, utcnow,
 )
+from app.services import generate_course_code
 from app.uploads import CERTIFICATES, receipts_dir, upload_dir
 
 TUTORS = [
@@ -108,8 +109,11 @@ def seed(db) -> bool:
 
     groups = []
     for title, cat, subj, level, price, period, sched, t_idx, desc in GROUPS:
-        g = Group(title=title, category=cat, subject=subj, level=level, price=price, price_period=period,
-                  schedule=sched, tutor_id=tutors[t_idx].id, description=desc, max_students=5)
+        g = Group(code=generate_course_code(db, cat, subj), title=title, category=cat, subject=subj, level=level,
+                  price=price, price_period=period, schedule=sched, tutor_id=tutors[t_idx].id, description=desc,
+                  max_students=5)
+        db.add(g)
+        db.flush()  # so the next generated code sees this one
         groups.append(g)
     db.add_all(groups)
     db.flush()

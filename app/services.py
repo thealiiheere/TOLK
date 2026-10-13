@@ -2,12 +2,12 @@
 
 Routers return plain dicts built here so the API shape lives in one place.
 """
+import re
 from datetime import datetime, timedelta, timezone
 
+from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
-
-from fastapi import UploadFile
 
 from app.config import settings
 from app.i18n import ApiError
@@ -82,6 +82,34 @@ def group_recipients(db: DbSession, group_id: int) -> list[tuple[int | None, str
     return [(tid, lang) for tid, lang in rows if tid]
 
 
+# ---------- course codes ----------
+
+def course_code_prefix(category: str, subject: str) -> str:
+    """'en' -> 'EN', 'Mathematics' -> 'MAT', non-latin subjects -> 'CRS'."""
+    if category == "language":
+        return subject.upper()[:3]
+    letters = re.sub(r"[^A-Za-z]", "", subject).upper()
+    return letters[:3] if len(letters) >= 2 else "CRS"
+
+
+def generate_course_code(db: DbSession, category: str, subject: str) -> str:
+    """First free code of the form PREFIX-101, PREFIX-102, ..."""
+    prefix = course_code_prefix(category, subject)
+    taken = set(db.scalars(select(Group.code).where(Group.code.like(f"{prefix}-%"))))
+    n = 101
+    while f"{prefix}-{n}" in taken:
+        n += 1
+    return f"{prefix}-{n}"
+
+
+def ensure_course_code_free(db: DbSession, code: str, group_id: int | None = None) -> None:
+    q = select(Group.id).where(Group.code == code)
+    if group_id is not None:
+        q = q.where(Group.id != group_id)
+    if db.scalar(q) is not None:
+        raise ApiError("course_code_taken", 409, code=code)
+
+
 # ---------- teacher certificates ----------
 
 async def add_tutor_documents(db: DbSession, tutor: User, files: list[UploadFile]) -> list[TutorDocument]:
@@ -149,6 +177,7 @@ def tutor_card(u: User | None, rating: tuple[float, int] | None) -> dict | None:
 def group_card(g: Group, enrolled: int, rating: tuple[float, int] | None) -> dict:
     return {
         "id": g.id,
+        "code": g.code,
         "title": g.title,
         "category": g.category,
         "subject": g.subject,

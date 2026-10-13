@@ -1,4 +1,5 @@
 """Pydantic request bodies. Responses are plain dicts built in app/services.py."""
+import re
 from datetime import datetime
 from typing import Literal
 from urllib.parse import urlsplit
@@ -77,7 +78,11 @@ class ProfileUpdateIn(BaseModel):
 
 # ---------- admin ----------
 
+COURSE_CODE_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{1,19}$")
+
+
 class GroupIn(BaseModel):
+    code: str = Field(default="", max_length=20)  # empty = generate automatically
     title: str = Field(min_length=2, max_length=160)
     category: Literal["language", "other"]
     subject: str = Field(min_length=1, max_length=80)
@@ -94,6 +99,14 @@ class GroupIn(BaseModel):
     @classmethod
     def strip(cls, v: str) -> str:
         return _clean(v)
+
+    @field_validator("code")
+    @classmethod
+    def course_code(cls, v: str) -> str:
+        v = _clean(v).upper()
+        if v and not COURSE_CODE_RE.match(v):
+            raise ValueError("invalid_course_code")
+        return v
 
     @model_validator(mode="after")
     def language_code(self):

@@ -1,6 +1,6 @@
 // Teacher dashboard: schedule lessons (a NEW meeting link every lesson), complete lessons, students, ratings.
 import {
-  api, avatar, busy, confirmSheet, empty, errorBox, fmtDate, formData, go, html, icon, loading, mount,
+  api, avatar, busy, codeBadge, confirmSheet, empty, errorBox, fmtDate, formData, go, html, icon, loading, mount,
   on, openLink, openSheet, state, stars, strikesDots, subjectIcon, subjectInfo, toLocalInput, toast, toastError,
 } from '../core.js';
 import { t } from '../i18n.js';
@@ -91,7 +91,7 @@ function groupCard(g) {
     <section class="card">
       <div class="card-head">
         <div class="row grow">${subjectIcon(s)}
-          <div class="grow"><h3 class="truncate">${g.title}</h3><div class="tiny muted">${s.label}${g.schedule ? ` · ${g.schedule}` : ''}</div></div></div>
+          <div class="grow"><h3 class="truncate">${g.title}</h3><div class="row-wrap tiny muted" style="gap:6px">${codeBadge(g.code)}<span>${s.label}${g.schedule ? ` · ${g.schedule}` : ''}</span></div></div></div>
         <button class="btn btn-outline btn-sm" data-action="students-open" data-id="${g.id}">${icon('users')} ${g.enrolled}/${g.max_students}</button>
       </div>
       <div class="card-body stack">

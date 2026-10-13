@@ -1,6 +1,6 @@
 // Student dashboard: upcoming lessons (join links), lessons to rate, my classes, homework, payments.
 import {
-  api, avatar, busy, empty, errorBox, fmtDate, fmtPrice, formData, go, html, icon, loading, mount, on, openLink,
+  api, avatar, busy, codeBadge, empty, errorBox, fmtDate, fmtPrice, formData, go, html, icon, loading, mount, on, openLink,
   openSheet, state, stars, strikesDots, subjectIcon, subjectInfo, toast, toastError,
 } from '../core.js';
 import { t } from '../i18n.js';
@@ -85,7 +85,7 @@ function classCard(c) {
   return html`
     <div class="card card-pad stack">
       <div class="row">${subjectIcon(s)}
-        <div class="grow"><a class="bold" href="#/class/${c.id}">${c.title}</a><div class="tiny muted">${s.label}${c.level ? ` · ${c.level}` : ''}</div></div></div>
+        <div class="grow"><a class="bold" href="#/class/${c.id}">${c.title}</a><div class="row-wrap tiny muted" style="gap:6px">${codeBadge(c.code)}<span>${s.label}${c.level ? ` · ${c.level}` : ''}</span></div></div></div>
       ${c.tutor ? html`<div class="row small">${avatar(c.tutor, 'avatar-sm')}<span class="grow truncate">${c.tutor.full_name}</span>
         ${c.tutor.telegram_username ? html`<a class="btn btn-ghost btn-sm" href="https://t.me/${c.tutor.telegram_username.replace('@', '')}" target="_blank" rel="noopener">${t('message')}</a>` : ''}</div>` : ''}
       ${c.schedule ? html`<div class="row small muted">${icon('calendar')}<span>${c.schedule}</span></div>` : ''}

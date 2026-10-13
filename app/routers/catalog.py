@@ -93,6 +93,7 @@ def list_groups(
     if q.strip():
         like = f"%{q.strip().lower()}%"
         stmt = stmt.where(or_(
+            func.lower(Group.code).like(like),
             func.lower(Group.title).like(like),
             func.lower(Group.subject).like(like),
             func.lower(Group.description).like(like),
