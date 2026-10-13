@@ -1,19 +1,27 @@
-"""Private file storage for payment receipts and teacher certificates.
+"""File storage: payment receipts and teacher certificates (private) and course posters (public).
 
-Files never go through the public /static mount: admins download them through authenticated
-endpoints (/api/admin/payments/{id}/receipt, /api/admin/tutors/{id}/documents/{doc_id}).
+Private files never go through a public URL: admins download them through authenticated endpoints
+(/api/admin/payments/{id}/receipt, /api/admin/tutors/{id}/documents/{doc_id}).
+Posters are public (/api/catalog/posters/{name}) and are always re-encoded, never served as uploaded.
 """
+import io
 import re
 import secrets
 from pathlib import Path
 
 from fastapi import UploadFile
+from PIL import Image, ImageOps
 
 from app.config import settings
 from app.i18n import ApiError
 
 RECEIPTS = "receipts"
 CERTIFICATES = "certificates"
+POSTERS = "posters"
+
+POSTER_MAX_SIZE = (1280, 800)
+POSTER_NAME_RE = re.compile(r"^poster_[0-9a-f]{24}\.webp$")
+Image.MAX_IMAGE_PIXELS = 40_000_000  # refuse decompression bombs early
 
 # Detect the real type from magic bytes instead of trusting the client's filename / content-type.
 _SIGNATURES = (
@@ -81,6 +89,30 @@ async def save_receipt(file: UploadFile | None) -> str:
     """Validate and store an uploaded receipt. Returns the stored filename."""
     data, ext = await read_upload(file, "receipt_required")
     return write_upload(RECEIPTS, data, ext)
+
+
+async def save_poster(file: UploadFile | None) -> str:
+    """Validate an image and store a re-encoded copy: resized to fit POSTER_MAX_SIZE, EXIF (incl. GPS) stripped,
+    saved as WEBP. Re-encoding also guarantees we never serve the uploaded bytes themselves."""
+    data, ext = await read_upload(file, "poster_required")
+    if ext == ".pdf":
+        raise ApiError("poster_bad_type")
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img = ImageOps.exif_transpose(img)
+            img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+            img.thumbnail(POSTER_MAX_SIZE, Image.Resampling.LANCZOS)
+            out = io.BytesIO()
+            img.save(out, "WEBP", quality=82, method=4)
+    except (OSError, ValueError, Image.DecompressionBombError):
+        raise ApiError("poster_bad_type") from None
+    return write_upload(POSTERS, out.getvalue(), ".webp")
+
+
+def poster_path(name: str) -> Path | None:
+    if not POSTER_NAME_RE.match(name):
+        return None
+    return stored_path(POSTERS, name)
 
 
 def stored_path(kind: str, filename: str) -> Path | None:

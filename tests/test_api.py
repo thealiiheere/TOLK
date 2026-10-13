@@ -1,5 +1,6 @@
 import io
 from datetime import timedelta
+from pathlib import Path
 
 from sqlalchemy import update
 
@@ -427,3 +428,78 @@ def test_course_codes_generated_validated_and_searchable(client):
     assert found("eng-a1") == [a]
     assert set(found("mat-1")) == {m}
     assert client.get(f"/api/catalog/groups/{a}").json()["code"] == "ENG-A1"
+
+
+# ---------- course posters ----------
+
+def _image_bytes(fmt="PNG", size=(2400, 1600), exif_gps=False):
+    from PIL import Image
+
+    img = Image.new("RGB", size, (200, 80, 40))
+    buf = io.BytesIO()
+    if exif_gps:
+        exif = Image.Exif()
+        exif[0x8825] = {1: "N", 2: (41.0, 18.0, 0.0)}  # GPS IFD
+        img.save(buf, fmt, exif=exif)
+    else:
+        img.save(buf, fmt)
+    return buf.getvalue()
+
+
+def test_course_poster_upload_replace_remove(client):
+    from PIL import Image
+
+    from app.config import settings
+
+    admin = make_admin(client)
+    tutor = make_tutor(client, admin)
+    gid = make_group(admin, tutor.user["id"])
+    assert client.get(f"/api/catalog/groups/{gid}").json()["poster_url"] is None
+
+    jpg = _image_bytes("JPEG", exif_gps=True)
+    res = admin.post(f"/api/admin/groups/{gid}/poster", files={"poster": ("photo.jpg", io.BytesIO(jpg), "image/jpeg")})
+    assert res.status_code == 200, res.text
+    url = res.json()["poster_url"]
+    assert client.get(f"/api/catalog/groups/{gid}").json()["poster_url"] == url
+    assert client.get("/api/catalog/groups").json()[0]["poster_url"] == url
+
+    img = client.get(url)  # public, cacheable, re-encoded
+    assert img.status_code == 200 and img.headers["content-type"] == "image/webp"
+    assert "immutable" in img.headers["cache-control"]
+    served = Image.open(io.BytesIO(img.content))
+    assert served.format == "WEBP" and served.size == (1200, 800)  # fitted into 1280x800, aspect kept
+    assert not served.getexif().get_ifd(0x8825)  # GPS stripped
+
+    poster_dir = Path(settings.upload_dir) / "posters"
+    first = url.rsplit("/", 1)[1]
+    res = admin.post(f"/api/admin/groups/{gid}/poster", files={"poster": ("p.png", io.BytesIO(_image_bytes()), "image/png")})
+    second = res.json()["poster_url"].rsplit("/", 1)[1]
+    assert second != first and not (poster_dir / first).exists() and (poster_dir / second).exists()
+
+    assert admin.delete(f"/api/admin/groups/{gid}/poster").status_code == 200
+    assert client.get(f"/api/catalog/groups/{gid}").json()["poster_url"] is None
+    assert not (poster_dir / second).exists()
+
+
+def test_course_poster_validation_and_cleanup(client):
+    from app.config import settings
+
+    admin = make_admin(client)
+    student = make_student(client)
+    tutor = make_tutor(client, admin)
+    gid = make_group(admin, tutor.user["id"])
+
+    def upload(api, name, data, ctype):
+        return api.post(f"/api/admin/groups/{gid}/poster", files={"poster": (name, io.BytesIO(data), ctype)})
+
+    assert upload(student, "p.png", _image_bytes(), "image/png").status_code == 403
+    assert upload(admin, "doc.pdf", b"%PDF-1.4 x", "application/pdf").json()["code"] == "poster_bad_type"
+    assert upload(admin, "fake.png", b"\x89PNG\r\n\x1a\n" + b"garbage" * 10, "image/png").json()["code"] == "poster_bad_type"
+    assert upload(admin, "x.txt", b"hello", "text/plain").json()["code"] == "receipt_bad_type"
+    assert admin.post(f"/api/admin/groups/{gid}/poster").json()["code"] == "poster_required"
+    assert client.get("/api/catalog/posters/..%2F..%2F.env").status_code == 404
+    assert client.get("/api/catalog/posters/poster_000000000000000000000000.webp").status_code == 404
+
+    name = upload(admin, "p.png", _image_bytes(), "image/png").json()["poster_url"].rsplit("/", 1)[1]
+    assert admin.delete(f"/api/admin/groups/{gid}").status_code == 200  # deleting the class removes its poster
+    assert not (Path(settings.upload_dir) / "posters" / name).exists()

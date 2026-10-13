@@ -1,7 +1,7 @@
 // Reusable rendering blocks shared by several pages.
 import {
   avatar, fmtDate, fmtNumber, fmtPrice, fmtRelative, html, icon, meetingPlatform, mount, on, periodLabel, ratingBadge,
-  codeBadge, stars, state, subjectIcon, subjectInfo,
+  codeBadge, coverInner, stars, state, subjectInfo,
 } from '../core.js';
 import { t } from '../i18n.js';
 
@@ -15,8 +15,8 @@ export function classCard(g) {
   const s = subjectInfo(g);
   return html`
     <a class="card class-card" href="#/class/${g.id}">
-      <div class="cover" style="--h:${s.hue}">
-        ${subjectIcon(s, 'lg')}<span class="subject">${s.label}</span>
+      <div class="cover ${g.poster_url ? 'has-poster' : ''}" style="--h:${s.hue}">
+        ${coverInner(g, s, 'lg')}<span class="subject">${s.label}</span>
         ${g.level ? html`<span class="tag badge">${g.level}</span>` : ''}
       </div>
       <div class="body">

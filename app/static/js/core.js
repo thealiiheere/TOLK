@@ -277,6 +277,12 @@ export function subjectIcon(info, size = 'md') {
     : html`<span class="emoji-mark ${size}">${info.emoji}</span>`;
 }
 
+/** Cover band of a class: the admin's poster image if set, otherwise the subject color + icon. */
+export function coverInner(group, info, iconSize) {
+  if (group.poster_url) return html`<img class="poster" src="${group.poster_url}" alt="" loading="lazy">`;
+  return subjectIcon(info, iconSize);
+}
+
 /** Course code chip, e.g. "EN-101". */
 export function codeBadge(code) {
   return code ? html`<span class="code-badge" title="${t('course_code')}">${code}</span>` : '';

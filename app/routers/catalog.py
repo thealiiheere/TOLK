@@ -2,6 +2,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
@@ -10,6 +11,7 @@ from app.database import get_db
 from app.i18n import ApiError
 from app.models import Enrollment, Group, LessonRating, Payment, User
 from app.services import enrolled_counts, group_card, review_dict, tutor_card, tutor_ratings
+from app.uploads import poster_path
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
@@ -159,6 +161,15 @@ def group_detail(
         my["can_enroll"] = not my["enrolled"] and not my["pending_payment"] and data["seats_left"] > 0
     data["my"] = my
     return data
+
+
+@router.get("/posters/{name}")
+def poster(name: str):
+    """Course poster image. Names are random per upload, so the file can be cached forever."""
+    path = poster_path(name)
+    if path is None:
+        raise ApiError("not_found", 404)
+    return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @router.get("/tutors/{tutor_id}")

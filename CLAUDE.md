@@ -19,7 +19,7 @@ Roles: `student`, `tutor` (shown as "teacher" in the UI), `admin`. Production: A
 
 ```bash
 python run.py                         # migrate + (demo seed if DEMO_MODE) + uvicorn --reload on :8000
-python -m pytest                      # tests/ (signed initData, temp SQLite; ~19 tests, ~6 s)
+python -m pytest                      # tests/ (signed initData, temp SQLite; ~21 tests, ~10 s)
 python -m app.seed [--reset]          # demo data; --reset drops all tables (refused in production)
 alembic revision --autogenerate -m "msg"   # after changing app/models.py, then review the file
 alembic upgrade head
@@ -47,31 +47,35 @@ app/
                  get_current_user → require_onboarded → require_admin / require_tutor / require_approved_tutor / require_student
   i18n.py        backend strings (API errors, Telegram notifications, bot welcome) in uz/ru/en; ApiError("key", status, **params)
   notify.py      best-effort Telegram messages via BackgroundTasks (never raises)
-  uploads.py     private file storage (upload_dir/receipts, upload_dir/certificates): magic-byte type check, size limit,
-                 random names, read_upload() validates before write_upload(); admin-only download endpoints
+  uploads.py     file storage under upload_dir: receipts/ + certificates/ (private, admin-only download) and posters/
+                 (public). Magic-byte type check, size limit, random names, read_upload() validates before
+                 write_upload(); save_poster() re-encodes (fit 1280x800, WEBP, EXIF/GPS stripped)
   seed.py        demo data (+ generated receipt and certificate images, auto course codes)
   main.py        app, error handlers (translate ApiError/validation via X-Lang), security headers + CSP,
                  /api/config, /health, static mount, index
   routers/
     auth.py      /api/auth: telegram, telegram-widget, demo-users, demo-login, me (GET/PATCH), logout,
                  onboarding (MULTIPART form: role, full_name, phone, bio, subjects, certificates[])
-    catalog.py   /api/catalog (public): filters, groups (filters + sort + q search), groups/{id}, tutors/{id}
+    catalog.py   /api/catalog (public): filters, groups (filters + sort + q search), groups/{id}, tutors/{id},
+                 posters/{name} (immutable cache)
     student.py   /api/student: dashboard, enroll (multipart receipt), lessons/{id}/rate, homework
     tutor.py     /api/tutor: dashboard, documents (GET/POST multipart), groups/{id}/students, lessons (POST/PATCH),
                  lessons/{id}/cancel|complete, strikes
-    admin.py     /api/admin: stats, payments (+receipt, review), groups CRUD (+students add/remove),
+    admin.py     /api/admin: stats, payments (+receipt, review), groups CRUD (+students add/remove,
+                 +poster POST multipart / DELETE),
                  tutors (+decision with comment, +documents/{doc_id} file), users (+block), violations, strikes
   static/
     index.html   shell only (appbar, #view, tabbar, #toasts)
     css/app.css  design tokens on :root, dark theme via [data-theme=dark] (synced with Telegram colorScheme)
     js/core.js   state, html`` templating (auto-escapes), api(), router, on() event delegation, sheets, toasts,
-                 formatting (price/date), avatar/stars/subjectInfo/subjectIcon/codeBadge, icons, session helpers
+                 formatting (price/date), avatar/stars/subjectInfo/subjectIcon/coverInner/codeBadge, icons, session helpers
     js/i18n.js   UI dictionary: key → [uz, ru, en]; t(key, {params}); language names for class subjects
     js/app.js    boot (Telegram init, theme, session restore), routes table, top bar + bottom tab bar
     js/pages/    explore.js (catalog+filters), class.js (class page, teacher page, enroll sheet),
                  account.js (login, onboarding, profile), student.js, tutor.js, admin.js,
                  components.js (class cards, reviews, lesson rows, certificatesField/certificatesError/documentList)
-alembic/versions/   0001_initial_schema, 0002_tutor_documents, 0003_course_code (data migration: backfills codes)
+alembic/versions/   0001_initial_schema, 0002_tutor_documents, 0003_course_code (data migration: backfills codes),
+                    0004_group_poster
 tests/              conftest.py (env, signed initData helper, Api client wrapper), test_api.py
 telegram_bot.py     long-polling bot: /start → welcome + Mini App button, sets menu button. Separate process.
 docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — NOT what production uses
@@ -90,6 +94,11 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
   Admin may type one (stored uppercased) or leave it empty → `generate_course_code` gives `PREFIX-101`, `-102`, …
   (prefix = language code, or first 3 Latin letters of the subject, else `CRS`). On edit, empty = keep current code.
   Duplicates → 409 `course_code_taken`. Migration 0003 duplicates the prefix logic (migrations never import app code).
+- **Course poster** (`Group.poster`, nullable filename): admin uploads JPG/PNG/WEBP in the class form (saved via
+  `POST /api/admin/groups/{id}/poster` AFTER the JSON create/update succeeds; "remove poster" → DELETE). The server
+  re-encodes to WEBP (never serves uploaded bytes), names are random per upload → `Cache-Control: immutable`.
+  Replacing/removing a poster or deleting the class deletes the old file. `group_card.poster_url` drives the covers
+  (`coverInner`): picture + dark bottom gradient if set, otherwise subject color + icon.
 - **Enrollment**: student uploads receipt → `Payment(pending, group_id)`. Admin approve → `Enrollment` created
   (capacity checked; `group_full` if no seat). One pending payment per student+group.
 - **Lessons**: tutor creates with `starts_at` (UTC, ≥ now-1h, ≤ +180d), `duration_min`, required `meet_link`
@@ -130,6 +139,9 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
   (`tutor.documents.append(doc)`) instead of `db.add(child)` when the parent's list is returned afterwards.
 - Pages render into `#view` via `mount(view, html`...`)`; async page handlers receive `alive()` and must check it after awaits.
 - Flags emoji don't render on Windows → language classes use a code tile (`subjectIcon`), not flags.
+- Mobile first (Telegram is ~360 px wide): never put a shrinking text next to buttons in one row. The catalog
+  results bar is [Filters][Sort] as a 2-column grid with the count on its own line below; ≥ 960 px it becomes
+  count-left / sort-right and the filter panel moves to the sidebar. Test at 360 px (`resize_window`).
 - Dates shown in the viewer's local time; `<input type=datetime-local>` values are converted with `new Date(v).toISOString()`.
 
 ## Recipes
@@ -163,5 +175,8 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
 - Only one process may long-poll a bot token: stop any local `telegram_bot.py` when the server bot runs.
 - `/static` is served with `Cache-Control: no-cache` (ETag revalidation) so deploys show up immediately.
 - Receipts and certificates are never publicly served; the admin UI fetches them with the bearer token (blob URLs).
+  Posters are the only public uploads.
+- The Browser pane often can't screenshot when the app window is hidden, and lazy images don't load there: verify
+  layout with getBoundingClientRect() via javascript_tool and fetch() the image URL instead of waiting on onload.
 - `.env` in this repo points at a local Postgres and holds an old, revoked bot token; the dev launch config uses SQLite.
 - Runtime data lives in `data/` (gitignored); old tracked artefacts (`app/tolk.db`, `app/uploads/`) were removed from git.

@@ -197,6 +197,16 @@ MESSAGES: dict[str, dict[str, str]] = {
         "ru": "Код {code} уже используется другим курсом",
         "en": "The code {code} is already used by another class",
     },
+    "poster_required": {
+        "uz": "Afisha uchun rasm tanlang",
+        "ru": "Выберите изображение для афиши",
+        "en": "Choose an image for the poster",
+    },
+    "poster_bad_type": {
+        "uz": "Afisha uchun faqat JPG, PNG yoki WEBP rasm yuklash mumkin",
+        "ru": "Для афиши подходят только изображения JPG, PNG или WEBP",
+        "en": "The poster must be a JPG, PNG or WEBP image",
+    },
     "certificates_required": {
         "uz": "Kamida bitta sertifikat yoki diplom yuklang (JPG, PNG, WEBP yoki PDF)",
         "ru": "Загрузите хотя бы один сертификат или диплом (JPG, PNG, WEBP или PDF)",

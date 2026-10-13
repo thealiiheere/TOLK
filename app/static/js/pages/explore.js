@@ -59,12 +59,14 @@ export async function render(view, _params, query, isAlive) {
         <aside class="filters-panel card card-pad" id="filters-aside">${loading()}</aside>
         <section>
           <div class="results-bar">
-            <h2 id="results-count" class="grow" style="font-size:18px">${t('classes')}</h2>
-            <button class="btn btn-outline btn-sm filters-toggle" data-action="f-open">${icon('filter')} ${t('filters')}
-              <span id="filters-count">${activeCount() ? html`<span class="count-dot">${activeCount()}</span>` : ''}</span></button>
-            <select class="select" data-change="f-sort" aria-label="${t('sort_by')}">
-              ${['rating', 'price_asc', 'price_desc', 'newest'].map((s) => html`<option value="${s}" ${f.sort === s ? 'selected' : ''}>${t(`sort_${s}`)}</option>`)}
-            </select>
+            <div class="results-controls">
+              <button class="btn btn-outline filters-toggle" data-action="f-open">${icon('filter')} ${t('filters')}
+                <span id="filters-count">${activeCount() ? html`<span class="count-dot">${activeCount()}</span>` : ''}</span></button>
+              <select class="select" data-change="f-sort" aria-label="${t('sort_by')}">
+                ${['rating', 'price_asc', 'price_desc', 'newest'].map((s) => html`<option value="${s}" ${f.sort === s ? 'selected' : ''}>${t(`sort_${s}`)}</option>`)}
+              </select>
+            </div>
+            <h2 id="results-count" class="results-count">${t('classes')}</h2>
           </div>
           <div id="results">${loading()}</div>
         </section>

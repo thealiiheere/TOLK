@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session as DbSession, selectinload
@@ -16,7 +16,9 @@ from app.services import (
     MAX_STRIKES, document_dict, enrolled_counts, ensure_course_code_free, generate_course_code, group_card, iso,
     tutor_card, tutor_ratings, user_brief,
 )
-from app.uploads import CERTIFICATES, MEDIA_TYPES, media_type, receipt_path, stored_path
+from app.uploads import (
+    CERTIFICATES, MEDIA_TYPES, POSTERS, delete_stored, media_type, receipt_path, save_poster, stored_path,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -215,8 +217,39 @@ def delete_group(group_id: int, _: User = Depends(require_admin), db: DbSession 
     group = db.get(Group, group_id)
     if group is None:
         raise ApiError("group_not_found", 404)
+    poster = group.poster
     db.delete(group)
     db.commit()
+    if poster:
+        delete_stored(POSTERS, poster)
+    return {"ok": True}
+
+
+@router.post("/groups/{group_id}/poster")
+async def upload_poster(
+    group_id: int, poster: UploadFile | None = File(None),
+    _: User = Depends(require_admin), db: DbSession = Depends(get_db),
+):
+    group = db.get(Group, group_id)
+    if group is None:
+        raise ApiError("group_not_found", 404)
+    old = group.poster
+    group.poster = await save_poster(poster)
+    db.commit()
+    if old:
+        delete_stored(POSTERS, old)
+    return {"poster_url": f"/api/catalog/posters/{group.poster}"}
+
+
+@router.delete("/groups/{group_id}/poster")
+def remove_poster(group_id: int, _: User = Depends(require_admin), db: DbSession = Depends(get_db)):
+    group = db.get(Group, group_id)
+    if group is None:
+        raise ApiError("group_not_found", 404)
+    old, group.poster = group.poster, None
+    db.commit()
+    if old:
+        delete_stored(POSTERS, old)
     return {"ok": True}
 
 

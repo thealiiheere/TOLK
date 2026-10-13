@@ -190,6 +190,7 @@ def group_card(g: Group, enrolled: int, rating: tuple[float, int] | None) -> dic
         "enrolled": enrolled,
         "seats_left": max(0, g.max_students - enrolled),
         "is_published": g.is_published,
+        "poster_url": f"/api/catalog/posters/{g.poster}" if g.poster else None,
         "tutor": tutor_card(g.tutor, rating),
     }
 

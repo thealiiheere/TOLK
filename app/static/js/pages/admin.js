@@ -1,7 +1,7 @@
 // Admin panel: overview, payments (receipts), classes (create / edit / students), teachers, users, discipline.
 import {
   api, avatar, busy, codeBadge, confirmSheet, empty, errorBox, fmtDate, fmtDateTime, fmtPrice, formData, go, html, icon, loading,
-  mount, on, openSheet, periodLabel, ratingBadge, strikesDots, subjectIcon, subjectInfo, toast, toastError,
+  mount, on, openSheet, periodLabel, ratingBadge, state, strikesDots, subjectIcon, subjectInfo, toast, toastError,
 } from '../core.js';
 import { LANGUAGE_CODES, subjectName, t } from '../i18n.js';
 import { documentList, paymentStatus } from './components.js';
@@ -150,7 +150,7 @@ async function classes(body, _query, alive) {
     ${groups.length ? html`<div class="grid grid-2">${groups.map((g) => {
       const s = subjectInfo(g);
       return html`<div class="card card-pad stack">
-        <div class="row">${subjectIcon(s)}<div class="grow">${codeBadge(g.code)} <a class="bold" href="#/class/${g.id}">${g.title}</a>
+        <div class="row">${g.poster_url ? html`<img class="poster-thumb" src="${g.poster_url}" alt="">` : subjectIcon(s)}<div class="grow">${codeBadge(g.code)} <a class="bold" href="#/class/${g.id}">${g.title}</a>
           <div class="tiny muted">${s.label}${g.level ? ` · ${g.level}` : ''}</div></div>
           ${g.is_published ? html`<span class="badge badge-success">${t('published')}</span>` : html`<span class="badge">${t('hidden')}</span>`}</div>
         ${g.tutor ? html`<div class="row small">${avatar(g.tutor, 'avatar-sm')}<span class="grow truncate">${g.tutor.full_name}</span>${ratingBadge(g.tutor)}</div>`
@@ -180,6 +180,15 @@ async function groupForm(group = null) {
         <input class="input mono" name="code" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9\-]{1,19}" style="text-transform:uppercase"
           value="${g.code || ''}" placeholder="${t('course_code_placeholder')}" autocomplete="off">
         <span class="hint">${group ? t('course_code_hint_edit') : t('course_code_hint')}</span></label>
+      <div class="field full"><span>${t('poster')} <span class="faint">(${t('optional')})</span></span>
+        <label class="file-drop poster-drop" data-poster-drop>
+          <input type="file" name="poster" accept="image/jpeg,image/png,image/webp" data-change="poster-picked">
+          ${g.poster_url ? html`<img src="${g.poster_url}" alt="" data-poster-preview>` : html`<span style="font-size:28px">🖼️</span>`}
+          <span class="bold" data-poster-label>${g.poster_url ? t('change_poster') : t('upload_poster')}</span>
+          <span class="tiny">${t('poster_hint', { mb: state.config.max_upload_mb || 5 })}</span>
+        </label>
+        ${g.poster_url ? html`<label class="check small"><input type="checkbox" name="remove_poster"> ${t('remove_poster')}</label>` : ''}
+      </div>
       <div class="field full"><span>${t('category')}</span><div class="seg block" data-category>
         <button type="button" class="${g.category === 'language' ? 'active' : ''}" data-action="cat-pick" data-v="language">🗣️ ${t('cat_language')}</button>
         <button type="button" class="${g.category === 'other' ? 'active' : ''}" data-action="cat-pick" data-v="other">📘 ${t('cat_other')}</button></div>
@@ -226,14 +235,44 @@ on('group-save', async (form) => {
     tutor_id: d.tutor_id ? Number(d.tutor_id) : null, is_published: form.is_published.checked,
   };
   const id = form.dataset.id;
+  const posterFile = form.poster.files?.[0];
+  const maxMb = state.config.max_upload_mb || 5;
+  if (posterFile && !/^image\/(jpeg|png|webp)$/.test(posterFile.type)) return toast(t('poster_type_hint'), 'warning');
+  if (posterFile && posterFile.size > maxMb * 1024 * 1024) return toast(t('file_too_large', { mb: maxMb }), 'warning');
   await busy(form.querySelector('[type=submit]'), async () => {
+    let saved;
     try {
-      await api(id ? `/api/admin/groups/${id}` : '/api/admin/groups', { method: id ? 'PUT' : 'POST', body });
-      sheetRef?.close();
+      saved = await api(id ? `/api/admin/groups/${id}` : '/api/admin/groups', { method: id ? 'PUT' : 'POST', body });
+    } catch (err) { toastError(err); return; }
+    try {
+      // The class is saved first; the poster is a separate upload so a bad image never loses the form.
+      if (posterFile) {
+        const fd = new FormData();
+        fd.append('poster', posterFile);
+        await api(`/api/admin/groups/${saved.id}/poster`, { method: 'POST', form: fd });
+      } else if (form.remove_poster?.checked) {
+        await api(`/api/admin/groups/${saved.id}/poster`, { method: 'DELETE' });
+      }
       toast(id ? t('saved') : t('class_created'), 'success');
-      go('/admin/classes');
-    } catch (err) { toastError(err); }
+    } catch (err) {
+      toast(`${t('class_saved_poster_failed')} ${err.message}`, 'error');
+    }
+    sheetRef?.close();
+    go('/admin/classes');
   });
+});
+on('poster-picked', (input) => {
+  const file = input.files?.[0];
+  const drop = input.closest('[data-poster-drop]');
+  if (!file || !drop) return;
+  drop.querySelectorAll('img, span[style]').forEach((n) => n.remove());
+  const img = document.createElement('img');
+  img.src = URL.createObjectURL(file);
+  img.alt = '';
+  drop.insertBefore(img, drop.querySelector('[data-poster-label]'));
+  drop.querySelector('[data-poster-label]').textContent = `✓ ${file.name}`;
+  const remove = input.form.remove_poster;
+  if (remove) remove.checked = false;
 });
 on('group-delete', async (el) => {
   const g = cache.groups.find((x) => x.id === Number(el.dataset.id));
