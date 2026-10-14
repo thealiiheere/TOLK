@@ -1,0 +1,35 @@
+# Continuous deployment: every push to main is deployed to the EC2 server.
+# Secrets (repo Settings → Secrets and variables → Actions): EC2_HOST, EC2_SSH_KEY (dedicated deploy key).
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # never interrupt a deploy halfway; queue the next one instead
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Pull and run deploy.sh on the server
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 10m
+          # The checkout in /srv/tolk belongs to the service user `tolk`, so git runs as that user.
+          script: |
+            set -e
+            cd /srv/tolk
+            sudo -u tolk git pull --ff-only origin main
+            bash deploy.sh
