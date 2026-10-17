@@ -42,7 +42,26 @@ function initTelegram() {
     tg.disableVerticalSwipes?.();
     tg.onEvent?.('themeChanged', applyTheme);
     tg.BackButton?.onClick(() => (history.length > 1 ? history.back() : go('/')));
+    setupDesktopFullscreen(tg);
   } catch { /* running outside Telegram or an old client */ }
+}
+
+// ---------- full screen on desktop Telegram ----------
+const MOBILE_PLATFORMS = new Set(['android', 'android_x', 'ios']);
+
+/**
+ * Telegram Desktop, macOS and Telegram Web open Mini Apps in a small phone-sized window. There we ask for full
+ * screen (Bot API 8.0+) so the desktop layout gets the whole screen. Phones are left alone. Returns true if enabled.
+ */
+export function setupDesktopFullscreen(tg) {
+  if (!tg?.initData || !tg.platform || tg.platform === 'unknown' || MOBILE_PLATFORMS.has(tg.platform)) return false;
+  if (typeof tg.requestFullscreen !== 'function' || !tg.isVersionAtLeast?.('8.0')) return false;
+  state.fullscreenCapable = true;
+  const refresh = () => renderShell(findRoute(currentRoute().path)?.tab);
+  tg.onEvent?.('fullscreenChanged', refresh);
+  tg.onEvent?.('fullscreenFailed', () => { state.fullscreenCapable = false; refresh(); });
+  if (!tg.isFullscreen) tg.requestFullscreen();
+  return true;
 }
 
 // ---------- session ----------
@@ -79,6 +98,9 @@ function renderShell(activeTab = '') {
       <a class="brand" href="#/"><span class="brand-mark">T</span><span>TOLK<small>${t('tagline')}</small></span></a>
       <nav class="nav">${items.filter((i) => !i.mobileOnly).map((i) => html`<a href="${i.href}" class="${i.tab === activeTab ? 'active' : ''}">${i.label}</a>`)}</nav>
       <div class="appbar-end">
+        ${state.fullscreenCapable ? html`<button class="lang-btn" data-action="toggle-fullscreen"
+          aria-label="${state.tg.isFullscreen ? t('exit_fullscreen') : t('enter_fullscreen')}" title="${state.tg.isFullscreen ? t('exit_fullscreen') : t('enter_fullscreen')}">
+          ${icon(state.tg.isFullscreen ? 'minimize' : 'maximize')}</button>` : ''}
         <details class="dropdown" id="lang-menu">
           <summary class="lang-btn" aria-label="${t('interface_language')}">${icon('globe')}${getLang().toUpperCase()}</summary>
           <div class="dropdown-menu">${Object.entries(LANGS).map(([code, name]) => html`
@@ -145,6 +167,9 @@ on('logout', async () => {
   go('/');
 });
 document.addEventListener('tolk:user', () => renderShell(findRoute(currentRoute().path)?.tab));
+on('toggle-fullscreen', () => {
+  try { (state.tg.isFullscreen ? state.tg.exitFullscreen() : state.tg.requestFullscreen()); } catch { /* unsupported */ }
+});
 document.addEventListener('tolk:signed-out', () => go('/login'));
 document.addEventListener('click', (e) => {
   // close dropdowns when clicking outside / on a link inside them

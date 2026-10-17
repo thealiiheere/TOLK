@@ -33,7 +33,8 @@
   --radius-lg: 24px;
   --appbar-h: 62px;
   --tabbar-h: 64px;
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
   --font: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: light;
 }
@@ -114,7 +115,7 @@ svg[aria-hidden="true"] { width: 18px; height: 18px; flex: none; vertical-align:
 .container { width: 100%; max-width: 1140px; margin: 0 auto; padding: 0 16px; }
 .appbar {
   position: sticky; top: 0; z-index: 30;
-  height: var(--appbar-h);
+  height: calc(var(--appbar-h) + var(--safe-top)); padding-top: var(--safe-top);
   background: var(--bg);
   border-bottom: 2px solid var(--line);
 }
@@ -352,7 +353,7 @@ body.no-tabbar main#view { padding-bottom: 40px; }
 .filters-panel { display: none; }
 @media (min-width: 960px) {
   .explore { grid-template-columns: 280px 1fr; align-items: start; }
-  .filters-panel { display: block; position: sticky; top: calc(var(--appbar-h) + 16px); }
+  .filters-panel { display: block; position: sticky; top: calc(var(--appbar-h) + var(--safe-top) + 16px); }
   .filters-toggle { display: none !important; }
 }
 .filter-group { padding: 16px 0; border-bottom: 2px dashed var(--border); }
@@ -434,7 +435,7 @@ body.no-tabbar main#view { padding-bottom: 40px; }
 
 /* ---------- detail pages ---------- */
 .detail { display: grid; gap: 22px; }
-@media (min-width: 960px) { .detail { grid-template-columns: 1fr 340px; align-items: start; } .detail .side { position: sticky; top: calc(var(--appbar-h) + 16px); } }
+@media (min-width: 960px) { .detail { grid-template-columns: 1fr 340px; align-items: start; } .detail .side { position: sticky; top: calc(var(--appbar-h) + var(--safe-top) + 16px); } }
 .detail-cover { border-radius: var(--radius-lg); height: 160px; border: 2px solid var(--line); box-shadow: var(--shadow); }
 .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .fact { padding: 12px 14px; border-radius: 16px; background: var(--surface); border: 2px solid var(--line); }

@@ -35,6 +35,8 @@ const D = {
   nav_sign_in: ['Kirish', 'Войти', 'Sign in'],
   sign_out: ['Chiqish', 'Выйти', 'Sign out'],
   profile: ['Profil', 'Профиль', 'Profile'],
+  enter_fullscreen: ["To'liq ekran", 'Во весь экран', 'Full screen'],
+  exit_fullscreen: ["To'liq ekrandan chiqish", 'Выйти из полноэкранного режима', 'Exit full screen'],
   interface_language: ['Interfeys tili', 'Язык интерфейса', 'Interface language'],
 
   // generic

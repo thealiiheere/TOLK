@@ -180,6 +180,10 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
 
 - Only one process may long-poll a bot token: stop any local `telegram_bot.py` when the server bot runs.
 - `/static` is served with `Cache-Control: no-cache` (ETag revalidation) so deploys show up immediately.
+- Desktop Telegram (tdesktop / macos / web*) gets `requestFullscreen()` at launch (`setupDesktopFullscreen` in app.js,
+  Bot API 8.0+; phones untouched) plus a toggle button. In full screen Telegram overlays its buttons: layout uses
+  `--safe-top` (= Telegram's `--tg-safe-area-inset-top` + `--tg-content-safe-area-inset-top`) on the app bar and
+  sticky panels — keep that when adding sticky/fixed elements at the top.
 - telegram-web-app.js reports `colorScheme: 'light'` even outside Telegram: only trust it when `inTelegram()`,
   otherwise use `prefers-color-scheme` (app.js `applyTheme`).
 - Receipts and certificates are never publicly served; the admin UI fetches them with the bearer token (blob URLs).
