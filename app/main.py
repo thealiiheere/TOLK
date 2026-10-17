@@ -44,7 +44,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 CSP = "; ".join([
     "default-src 'self'",
     "script-src 'self' https://telegram.org",
-    "style-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https://t.me https://*.telegram.org https://*.telesco.pe",
     "frame-src https://oauth.telegram.org",
     "connect-src 'self'",

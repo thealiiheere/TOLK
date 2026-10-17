@@ -35,7 +35,7 @@ export async function renderClass(view, params, _query, alive) {
     <div class="container">
       <div class="detail">
         <div class="stack-lg">
-          <div class="cover detail-cover ${g.poster_url ? 'has-poster' : ''}" style="--h:${s.hue}">${coverInner(g, s, 'xl')}<span class="subject">${s.label}</span></div>
+          <div class="cover detail-cover tone-${s.tone} ${g.poster_url ? 'has-poster' : ''}">${coverInner(g, s, 'xl')}<span class="subject">${s.label}</span></div>
           <div>
             <div class="row-wrap" style="margin-bottom:8px">
               <span class="badge badge-primary">${g.category === 'language' ? t('cat_language') : t('cat_other')}</span>

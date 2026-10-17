@@ -66,7 +66,7 @@ app/
                  tutors (+decision with comment, +documents/{doc_id} file), users (+block), violations, strikes
   static/
     index.html   shell only (appbar, #view, tabbar, #toasts)
-    css/app.css  design tokens on :root, dark theme via [data-theme=dark] (synced with Telegram colorScheme)
+    css/app.css  "Bright" design: tokens on :root, dark theme via [data-theme=dark] (synced with Telegram colorScheme)
     js/core.js   state, html`` templating (auto-escapes), api(), router, on() event delegation, sheets, toasts,
                  formatting (price/date), avatar/stars/subjectInfo/subjectIcon/coverInner/codeBadge, icons, session helpers
     js/i18n.js   UI dictionary: key → [uz, ru, en]; t(key, {params}); language names for class subjects
@@ -138,6 +138,12 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
 - ORM collections stay loaded after commit (`expire_on_commit=False`): append to relationships
   (`tutor.documents.append(doc)`) instead of `db.add(child)` when the parent's list is returned afterwards.
 - Pages render into `#view` via `mount(view, html`...`)`; async page handlers receive `alive()` and must check it after awaits.
+- **Design "Bright"** (chosen by the client): cream `--bg`, royal-blue `--primary`, TOLK-orange `--accent` (always with
+  dark `--accent-ink` text), 2px `--line` outlines + hard offset shadows (`--shadow-sm/--shadow/--shadow-lg`), radii
+  `--radius-sm/--radius/--radius-lg`, Nunito 600 body / 800–900 headings. Covers are solid `.tone-0…5` colors picked by
+  `subjectInfo().tone`; code tile = white tilted sticker. Segmented controls/tabs render as pills. Reuse the tokens; never
+  hard-code colors except on covers (which are bright in both themes). Nunito comes from Google Fonts — CSP allows
+  only `fonts.googleapis.com` (style) and `fonts.gstatic.com` (font) for that.
 - Flags emoji don't render on Windows → language classes use a code tile (`subjectIcon`), not flags.
 - Mobile first (Telegram is ~360 px wide): never put a shrinking text next to buttons in one row. The catalog
   results bar is [Filters][Sort] as a 2-column grid with the count on its own line below; ≥ 960 px it becomes
@@ -174,6 +180,8 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
 
 - Only one process may long-poll a bot token: stop any local `telegram_bot.py` when the server bot runs.
 - `/static` is served with `Cache-Control: no-cache` (ETag revalidation) so deploys show up immediately.
+- telegram-web-app.js reports `colorScheme: 'light'` even outside Telegram: only trust it when `inTelegram()`,
+  otherwise use `prefers-color-scheme` (app.js `applyTheme`).
 - Receipts and certificates are never publicly served; the admin UI fetches them with the bearer token (blob URLs).
   Posters are the only public uploads.
 - The Browser pane often can't screenshot when the app window is hidden, and lazy images don't load there: verify

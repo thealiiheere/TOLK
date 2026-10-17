@@ -46,7 +46,7 @@ export async function render(view, _params, query, isAlive) {
   mount(view, html`
     <div class="container">
       <section class="hero">
-        <h1>${t('hero_title')}</h1>
+        <h1>${t('hero_title_a')}<br><span class="hl">${t('hero_title_b')}</span></h1>
         <p>${t('hero_text')}</p>
         <form class="search" data-submit="f-search" role="search">
           ${icon('search')}

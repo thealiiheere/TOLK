@@ -81,6 +81,8 @@ const D = {
 
   // explore
   hero_title: ["O'qituvchingizni toping va kichik guruhlarda o'rganing", 'Найдите своего преподавателя и учитесь в мини-группах', 'Find your teacher. Learn in small groups.'],
+  hero_title_a: ["O'qituvchingizni toping.", 'Найдите своего преподавателя.', 'Find your teacher.'],
+  hero_title_b: ["Kichik guruhlarda o'rganing.", 'Учитесь в мини-группах.', 'Learn in small groups.'],
   hero_text: [
     "Til kurslari va boshqa fanlar bo'yicha onlayn darslar. O'qituvchilar reytingi — haqiqiy o'quvchilar baholari asosida.",
     'Онлайн-занятия по языкам и другим предметам. Рейтинг преподавателей — по оценкам реальных учеников.',

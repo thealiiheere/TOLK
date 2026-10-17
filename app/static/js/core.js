@@ -264,10 +264,13 @@ const OTHER_EMOJI = [
 export function subjectInfo(group) {
   if (group.category === 'language') {
     // Language code instead of a flag emoji: flags don't render on Windows (incl. Telegram Desktop).
-    return { label: subjectName(group.subject), code: group.subject.toUpperCase(), hue: hue(group.subject) };
+    const h = hue(group.subject);
+    return { label: subjectName(group.subject), code: group.subject.toUpperCase(), hue: h, tone: h % 6 };
   }
   const found = OTHER_EMOJI.find(([re]) => re.test(group.subject));
-  return { label: group.subject, emoji: found ? found[1] : '📘', hue: hue(group.subject.toLowerCase()) };
+  const h = hue(group.subject.toLowerCase());
+  // tone = one of the bright cover colors (.tone-0 … .tone-5 in app.css)
+  return { label: group.subject, emoji: found ? found[1] : '📘', hue: h, tone: h % 6 };
 }
 
 /** Icon for a class: a language-code tile for languages, an emoji for other subjects. */

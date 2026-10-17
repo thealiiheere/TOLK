@@ -15,7 +15,7 @@ export function classCard(g) {
   const s = subjectInfo(g);
   return html`
     <a class="card class-card" href="#/class/${g.id}">
-      <div class="cover ${g.poster_url ? 'has-poster' : ''}" style="--h:${s.hue}">
+      <div class="cover tone-${s.tone} ${g.poster_url ? 'has-poster' : ''}">
         ${coverInner(g, s, 'lg')}<span class="subject">${s.label}</span>
         ${g.level ? html`<span class="tag badge">${g.level}</span>` : ''}
       </div>

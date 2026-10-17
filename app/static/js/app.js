@@ -25,11 +25,12 @@ route('/admin/:tab', admin.render, { tab: 'admin', role: 'admin', back: true });
 // ---------- theme ----------
 function applyTheme() {
   const tg = state.tg;
-  const dark = tg?.colorScheme ? tg.colorScheme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  // telegram-web-app.js reports colorScheme 'light' even outside Telegram, so only trust it inside the Mini App
+  const dark = inTelegram() && tg?.colorScheme ? tg.colorScheme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   const surface = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim();
   const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
-  try { tg?.setHeaderColor?.(surface); tg?.setBackgroundColor?.(bg); tg?.setBottomBarColor?.(surface); } catch { /* old clients */ }
+  try { tg?.setHeaderColor?.(bg); tg?.setBackgroundColor?.(bg); tg?.setBottomBarColor?.(surface); } catch { /* old clients */ }
 }
 
 function initTelegram() {
