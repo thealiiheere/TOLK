@@ -1,7 +1,7 @@
 // Reusable rendering blocks shared by several pages.
 import {
   avatar, fmtDate, fmtNumber, fmtPrice, fmtRelative, html, icon, meetingPlatform, mount, on, periodLabel, ratingBadge,
-  codeBadge, coverInner, stars, state, subjectInfo,
+  codeBadge, coverInner, scheduleParts, stars, state, subjectInfo,
 } from '../core.js';
 import { t } from '../i18n.js';
 
@@ -9,6 +9,15 @@ export function seatsInfo(g) {
   const tone = g.seats_left === 0 ? 'danger' : g.seats_left <= 1 ? 'warning' : 'success';
   const label = g.seats_left === 0 ? t('class_full') : t('seats_left', { n: g.seats_left });
   return html`<span class="badge badge-${tone}">${label}</span>`;
+}
+
+/** The card's "when" column: the class time large with its days under it, or the days alone. */
+function whenColumn(schedule) {
+  const w = scheduleParts(schedule);
+  if (!w) return '';
+  if (w.time) return html`<div class="when"><div class="when-time">${w.time}</div>${w.days ? html`<div class="when-days">${w.days}</div>` : ''}</div>`;
+  // short day lists ("Пн · Пт") are set large; longer text ("По договорённости") stays small so the title keeps its room
+  return html`<div class="when days-only ${w.days.length > 13 ? 'long' : ''}"><div class="when-days">${w.days}</div></div>`;
 }
 
 export function classCard(g) {
@@ -20,11 +29,15 @@ export function classCard(g) {
         ${g.level ? html`<span class="tag badge">${g.level}</span>` : ''}
       </div>
       <div class="body">
-        <div>${codeBadge(g.code)}<h3 style="margin-top:6px">${g.title}</h3></div>
-        ${g.tutor ? html`<div class="row">${avatar(g.tutor, 'avatar-sm')}
-          <div class="grow"><div class="small bold truncate">${g.tutor.full_name}</div>${ratingBadge(g.tutor)}</div></div>` : ''}
+        <div class="card-top">
+          <div class="grow">
+            ${codeBadge(g.code)}<h3 style="margin-top:6px">${g.title}</h3>
+            ${g.tutor ? html`<div class="row" style="margin-top:10px">${avatar(g.tutor, 'avatar-sm')}
+              <div class="grow"><div class="small bold truncate">${g.tutor.full_name}</div>${ratingBadge(g.tutor)}</div></div>` : ''}
+          </div>
+          ${whenColumn(g.schedule)}
+        </div>
         <div class="meta">
-          ${g.schedule ? html`<span>${icon('calendar')}${g.schedule}</span>` : ''}
           <span>${icon('users')}${t('group_size', { n: g.enrolled, max: g.max_students })}</span>
         </div>
         <div class="foot">

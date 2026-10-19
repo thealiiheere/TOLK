@@ -24,6 +24,29 @@ const LANGUAGE_NAMES = {
   it: ['Italyan tili', 'Итальянский', 'Italian'],
 };
 
+// Weekdays Monday → Sunday for the admin's free-text class schedules: the label shown in each language [uz, ru, en]
+// and every spelling an admin may type (full names and abbreviations, Uzbek in Latin and Cyrillic; lowercase, ё as е).
+const WEEKDAYS = [
+  [['Du', 'Пн', 'Mon'], 'du dush dushanba ду душ душанба пн пон понед понедельник mo mon monday'],
+  [['Se', 'Вт', 'Tue'], 'se sesh seshanba се сеш сешанба вт втор вторник tu tue tues tuesday'],
+  [['Cho', 'Ср', 'Wed'], 'ch cho chor chorshanba чо чор чоршанба ср сред среда среду we wed weds wednesday'],
+  [['Pa', 'Чт', 'Thu'], 'pa pay paysh payshanba па пай пайшанба чт чет четв четверг th thu thur thurs thursday'],
+  [['Ju', 'Пт', 'Fri'], 'ju jum juma жу жум жума пт пят пятн пятница пятницу fr fri friday'],
+  [['Sha', 'Сб', 'Sat'], 'sh sha shan shanba ша шан шанба сб суб субб суббота субботу sa sat saturday'],
+  [['Ya', 'Вс', 'Sun'], 'ya yak yaksh yakshanba як якш якшанба вс вос воскр воскресенье su sun sunday'],
+];
+const DAY_INDEX = new Map(WEEKDAYS.flatMap(([, words], i) => words.split(' ').map((w) => [w, i])));
+const DAY_CONNECTORS = new Set(['and', 'va', 'ва', 'hamda', 'ҳамда', 'и']);
+// Whole-schedule phrases → UI key (compared after lowercasing, ё → е and unifying apostrophes)
+const SCHEDULE_PHRASES = {
+  sched_daily: ['har kuni', 'ҳар куни', 'хар куни', 'каждый день', 'ежедневно', 'daily', 'every day', 'everyday'],
+  sched_weekdays: ['ish kunlari', 'иш кунлари', 'будни', 'по будням', 'в будни', 'weekdays', 'on weekdays'],
+  sched_weekends: ['dam olish kunlari', 'дам олиш кунлари', 'выходные', 'по выходным', 'в выходные', 'weekends', 'on weekends'],
+  sched_on_request: ["kelishuv bo'yicha", 'kelishilgan holda', 'kelishuv asosida', 'келишув бўйича', 'по договоренности',
+    'по запросу', 'по согласованию', 'on request', 'by arrangement', 'by appointment'],
+};
+const normWord = (s) => s.toLowerCase().replace(/ё/g, 'е');
+
 const D = {
   // shell & navigation
   tagline: ["Ta'lim platformasi", 'Образовательная платформа', 'Learning platform'],
@@ -136,6 +159,10 @@ const D = {
 
   // class page
   schedule: ['Jadval', 'Расписание', 'Schedule'],
+  sched_daily: ['Har kuni', 'Каждый день', 'Every day'],
+  sched_weekdays: ['Ish kunlari', 'По будням', 'Weekdays'],
+  sched_weekends: ['Dam olish kunlari', 'По выходным', 'Weekends'],
+  sched_on_request: ["Kelishuv bo'yicha", 'По договорённости', 'On request'],
   price: ['Narx', 'Цена', 'Price'],
   group_size_label: ['Guruh', 'Группа', 'Group'],
   format: ['Format', 'Формат', 'Format'],
@@ -407,6 +434,23 @@ export function t(key, params) {
   let text = entry ? entry[ORDER.indexOf(current)] ?? entry[2] : key;
   if (params) text = text.replace(/\{(\w+)\}/g, (_, k) => (params[k] ?? ''));
   return text;
+}
+
+/**
+ * Day names of a free-text schedule ("Mon / Wed / Fri", "Пн, Пт", "Har kuni") in the current UI language.
+ * Text containing any word that isn't a day name is returned unchanged, so free-form notes are never mangled.
+ */
+export function translateDays(text) {
+  const s = String(text || '');
+  const phrase = normWord(s).replace(/[ʻʼ‘’`]/g, "'").replace(/\s+/g, ' ').replace(/^[\s.]+|[\s.]+$/g, '');
+  for (const [key, spellings] of Object.entries(SCHEDULE_PHRASES)) if (spellings.includes(phrase)) return t(key);
+  const words = s.match(/\p{L}+/gu) || [];
+  if (!words.every((w) => DAY_INDEX.has(normWord(w)) || DAY_CONNECTORS.has(normWord(w)))) return s;
+  const lang = ORDER.indexOf(current);
+  return s.replace(/\p{L}+/gu, (w) => (DAY_INDEX.has(normWord(w)) ? WEEKDAYS[DAY_INDEX.get(normWord(w))][0][lang] : '/'))
+    .replace(/(\p{L})\./gu, '$1') // abbreviation dots ("Mon.")
+    .replace(/(\p{L})\s+(?=\p{L})/gu, '$1 / ') // "Mon Wed" lists
+    .replace(/\s*[-–—]\s*/g, '–'); // ranges: "Mon-Fri" → "Du–Ju"
 }
 
 export function subjectName(code) {

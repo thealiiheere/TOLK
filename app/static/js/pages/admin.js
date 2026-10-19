@@ -1,6 +1,6 @@
 // Admin panel: overview, payments (receipts), classes (create / edit / students), teachers, users, discipline.
 import {
-  api, avatar, busy, codeBadge, confirmSheet, empty, errorBox, fmtDate, fmtDateTime, fmtPrice, formData, go, html, icon, loading,
+  api, avatar, busy, codeBadge, confirmSheet, empty, errorBox, fmtDate, fmtDateTime, fmtPrice, fmtSchedule, formData, go, html, icon, loading,
   mount, on, openSheet, periodLabel, ratingBadge, state, strikesDots, subjectIcon, subjectInfo, toast, toastError,
 } from '../core.js';
 import { LANGUAGE_CODES, subjectName, t } from '../i18n.js';
@@ -156,7 +156,7 @@ async function classes(body, _query, alive) {
         ${g.tutor ? html`<div class="row small">${avatar(g.tutor, 'avatar-sm')}<span class="grow truncate">${g.tutor.full_name}</span>${ratingBadge(g.tutor)}</div>`
           : html`<div class="notice notice-warning small"><span class="ico">⚠️</span><div>${t('no_teacher_assigned')}</div></div>`}
         <div class="row-wrap small muted"><b style="color:var(--text)">${fmtPrice(g.price)} / ${periodLabel(g.price_period)}</b>
-          <span>· ${t('group_size', { n: g.enrolled, max: g.max_students })}</span>${g.schedule ? html`<span>· ${g.schedule}</span>` : ''}</div>
+          <span>· ${t('group_size', { n: g.enrolled, max: g.max_students })}</span>${g.schedule ? html`<span>· ${fmtSchedule(g.schedule)}</span>` : ''}</div>
         <div class="tiny muted">${g.next_lesson_at ? `${t('next_lesson')}: ${fmtDateTime(g.next_lesson_at)}` : t('no_lesson_scheduled')}</div>
         <div class="row-wrap">
           <button class="btn btn-soft btn-sm" data-action="group-students" data-id="${g.id}">${icon('users')} ${t('students')}</button>

@@ -1,5 +1,5 @@
 // Core runtime shared by all pages: state, safe HTML templating, API client, router, UI primitives, formatting.
-import { t, getLang, subjectName, LANG_LOCALES } from './i18n.js';
+import { t, getLang, subjectName, translateDays, LANG_LOCALES } from './i18n.js';
 
 // ---------- storage (can throw in private mode / embedded webviews) ----------
 export const storage = {
@@ -226,6 +226,33 @@ export function fmtRelative(iso) {
   const [value, unit] = abs < 3600 ? [Math.round(diff / 60), 'minute'] : abs < 86400 ? [Math.round(diff / 3600), 'hour'] : [Math.round(diff / 86400), 'day'];
   try { return new Intl.RelativeTimeFormat(locale(), { numeric: 'auto' }).format(value, unit); } catch { return fmtDateTime(iso); }
 }
+// Class schedules are free text typed by the admin ("Mon / Wed / Fri 19:00", "Пн/Пт", "Sat 15:00–16:30").
+const TIME_RE = /([01]?\d|2[0-3])[:.]([0-5]\d)(?:\s*[-–—]\s*([01]?\d|2[0-3])[:.]([0-5]\d))?/g;
+const hhmm = (h, m) => `${h.padStart(2, '0')}:${m}`;
+
+/**
+ * Split a schedule into the class time and its days, day names in the UI language:
+ * { time: '15:00', range: '15:00–16:30', days: 'Sha' }. Null for an empty schedule.
+ */
+export function scheduleParts(text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  const times = [...s.matchAll(TIME_RE)];
+  const m = times.length === 1 ? times[0] : null; // several times ("Mon 18:00, Sat 11:00") stay next to their days
+  const days = translateDays(m ? s.slice(0, m.index) + s.slice(m.index + m[0].length) : s)
+    .replace(/\s*[/|,;·•+&]\s*/g, ' · ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s·,.–—-]+|[\s·,.–—-]+$/g, '');
+  if (!m) return { time: '', range: '', days };
+  const time = hhmm(m[1], m[2]);
+  return { time, range: m[3] ? `${time}–${hhmm(m[3], m[4])}` : time, days };
+}
+/** The whole schedule on one line in the UI language: "Du · Cho · Ju, 19:00". */
+export function fmtSchedule(text) {
+  const p = scheduleParts(text);
+  return p ? [p.days, p.range].filter(Boolean).join(', ') : '';
+}
+
 /** Value for <input type="datetime-local"> in the user's local time. */
 export function toLocalInput(date) {
   const d = new Date(date);

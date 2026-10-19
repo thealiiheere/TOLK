@@ -418,6 +418,14 @@ body.no-tabbar main#view { padding-bottom: 40px; }
 .poster-drop img { max-height: 160px; border-radius: 12px; object-fit: cover; }
 .class-card .body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .class-card h3 { font-size: 19px; font-weight: 900; }
+/* "Departures" column: the class time large, its days under it (or the days alone when there is no time) */
+.class-card .card-top { display: flex; align-items: flex-start; gap: 12px; }
+.class-card .when { flex: none; max-width: 42%; text-align: right; padding-top: 2px; }
+.class-card .when-time { font-size: 26px; font-weight: 900; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.class-card .when-days { margin-top: 5px; font-size: 13px; font-weight: 800; color: var(--muted); line-height: 1.3; }
+.class-card .when.days-only .when-days { margin-top: 0; font-size: 17px; font-weight: 900; color: var(--text); }
+.class-card .when.days-only.long .when-days { font-size: 13px; font-weight: 800; color: var(--muted); }
+.class-card .price { white-space: nowrap; }
 .code-badge {
   display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 8px; background: var(--primary-soft);
   color: var(--primary); font: 900 12px/1 var(--font); letter-spacing: .04em; white-space: nowrap;

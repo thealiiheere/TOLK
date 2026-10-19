@@ -1,6 +1,6 @@
 // Public class page, teacher profile page, and the enroll (pay + upload receipt) sheet.
 import {
-  api, avatar, busy, codeBadge, coverInner, empty, errorBox, fmtPrice, go, html, icon, loading, mount, on, openSheet, periodLabel,
+  api, avatar, busy, codeBadge, coverInner, empty, errorBox, fmtPrice, fmtSchedule, go, html, icon, loading, mount, on, openSheet, periodLabel,
   ratingBadge, state, subjectInfo, toast, toastError,
 } from '../core.js';
 import { t } from '../i18n.js';
@@ -47,7 +47,7 @@ export async function renderClass(view, params, _query, alive) {
             ${tutor ? html`<div class="row mt">${avatar(tutor, 'avatar-sm')}<a href="#/teacher/${tutor.id}" class="bold">${tutor.full_name}</a>${ratingBadge(tutor)}</div>` : ''}
           </div>
           <div class="facts">
-            <div class="fact"><div class="k">${t('schedule')}</div><div class="v">${g.schedule || '—'}</div></div>
+            <div class="fact"><div class="k">${t('schedule')}</div><div class="v">${fmtSchedule(g.schedule) || '—'}</div></div>
             <div class="fact"><div class="k">${t('price')}</div><div class="v">${fmtPrice(g.price)} / ${periodLabel(g.price_period)}</div></div>
             <div class="fact"><div class="k">${t('group_size_label')}</div><div class="v">${t('group_size', { n: g.enrolled, max: g.max_students })}</div></div>
             <div class="fact"><div class="k">${t('format')}</div><div class="v">${t('format_online')}</div></div>

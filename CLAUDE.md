@@ -90,6 +90,10 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
   rating / price_asc / price_desc / newest.
 - **Group**: `category` = `language` (subject = ISO code like `en`, validated/lowercased in `GroupIn`) or `other`
   (free-text subject). Price in UZS (int), `price_period` month/course/lesson, `max_students` (default 5).
+- **Schedule** (`Group.schedule`) is free text typed by the admin. The UI never prints it raw: `scheduleParts` /
+  `fmtSchedule` (core.js) pull out the time and redraw day names in the viewer's language via `translateDays`
+  (i18n.js: uz/ru/en spellings incl. Uzbek Cyrillic, ranges "Mon-Fri", phrases every day / weekdays / weekends /
+  on request). Text with any other word is shown as typed. Class cards show the time large with the days under it.
 - **Course code** (`Group.code`, NOT NULL, unique index): uppercase `[A-Z0-9][A-Z0-9-]{1,19}` (`invalid_course_code`).
   Admin may type one (stored uppercased) or leave it empty → `generate_course_code` gives `PREFIX-101`, `-102`, …
   (prefix = language code, or first 3 Latin letters of the subject, else `CRS`). On edit, empty = keep current code.
