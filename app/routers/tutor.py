@@ -4,6 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
+from app import ratelimit
 from app.auth import require_approved_tutor, require_tutor
 from app.database import get_db
 from app.i18n import ApiError
@@ -123,6 +124,7 @@ async def upload_documents(
     db: DbSession = Depends(get_db),
 ):
     """Add certificates. A rejected teacher who uploads new documents goes back to the review queue."""
+    ratelimit.check("documents", tutor.id)
     docs = await add_tutor_documents(db, tutor, certificates)
     if tutor.tutor_status == "rejected":
         tutor.tutor_status = "pending"

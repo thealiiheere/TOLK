@@ -19,7 +19,7 @@ Roles: `student`, `tutor` (shown as "teacher" in the UI), `admin`. Production: A
 
 ```bash
 python run.py                         # migrate + (demo seed if DEMO_MODE) + uvicorn --reload on :8000 (PORT=... to change)
-python -m pytest                      # tests/ only (pytest.ini; signed initData, temp SQLite, cache off; ~23 tests)
+python -m pytest                      # tests/ only (pytest.ini; signed initData, temp SQLite, cache off or FakeRedis; ~29 tests)
 python -m app.test_redis              # Redis connection test: run AS A MODULE from the project folder, exit 0 = OK
 python -m app.seed [--reset]          # demo data; --reset drops all tables (refused in production)
 alembic revision --autogenerate -m "msg"   # after changing app/models.py, then review the file
@@ -51,6 +51,7 @@ app/
   cache.py       optional Redis cache (REDIS_URL): get_json / set_json / delete / cached(key, ttl, fn) / status.
                  Never raises: no URL or Redis down = miss. Keys prefixed "tolk:". Session events forget entries
                  after commits (see "Caching" in Domain rules).
+  ratelimit.py   Redis fixed-window limits (LIMITS): ratelimit.check(name, who) → 429 too_many_requests + Retry-After
   test_redis.py  `python -m app.test_redis`: ping + write/read/delete round trip, prints version and memory limit
   uploads.py     file storage under upload_dir: receipts/ + certificates/ (private, admin-only download) and posters/
                  (public). Magic-byte type check, size limit, random names, read_upload() validates before
@@ -127,6 +128,11 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
 - **Admins**: users in `ADMIN_TELEGRAM_IDS` are promoted at sign-in AND on their next authenticated request
   (`auth.get_current_user_optional`), so editing the env var + restarting is enough.
 - **Blocking** a user deletes their sessions; blocked users get 403 `account_blocked`.
+- **Rate limits** (`app/ratelimit.py`, Redis; off without Redis): sign-ins (Telegram, widget, demo) 30 / 10 min
+  per IP; per user per hour: receipt uploads 10, onboarding 10, teacher documents 20, homework 60. Failed attempts
+  count. The IP is the real client's: uvicorn runs with `--proxy-headers --forwarded-allow-ips 127.0.0.1` behind
+  nginx (`X-Forwarded-For $proxy_add_x_forwarded_for`), so a client-sent X-Forwarded-For can't fake it.
+  New spam-prone endpoint → add a LIMITS entry and call `ratelimit.check(...)` first thing in the handler.
 - **Caching** (`app/cache.py`). Server (Redis): public catalog answers (`/api/catalog` filters, groups list per
   filter combination, class page minus `my`, teacher page; 5 min) under a catalog version, and the admin overview
   `/api/admin/stats` (one key, 60 s). Forgetting is automatic: SQLAlchemy session events note which models changed

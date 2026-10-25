@@ -8,6 +8,7 @@ from app.auth import (
     bearer_token, create_session, delete_session, get_current_user, upsert_telegram_user,
     verify_login_widget, verify_webapp_init_data,
 )
+from app import ratelimit
 from app.config import settings
 from app.database import get_db
 from app.i18n import ApiError
@@ -32,8 +33,9 @@ def _require_bot_token() -> str:
 
 
 @router.post("/telegram")
-def telegram_webapp_login(body: TelegramAuthIn, db: DbSession = Depends(get_db)):
+def telegram_webapp_login(body: TelegramAuthIn, request: Request, db: DbSession = Depends(get_db)):
     """Sign in from inside the Telegram Mini App using the signed initData string."""
+    ratelimit.check("signin", ratelimit.client_ip(request))
     tg = verify_webapp_init_data(
         body.init_data, _require_bot_token(), settings.telegram_auth_max_age_hours * 3600
     )
@@ -41,8 +43,9 @@ def telegram_webapp_login(body: TelegramAuthIn, db: DbSession = Depends(get_db))
 
 
 @router.post("/telegram-widget")
-def telegram_widget_login(body: TelegramWidgetIn, db: DbSession = Depends(get_db)):
+def telegram_widget_login(body: TelegramWidgetIn, request: Request, db: DbSession = Depends(get_db)):
     """Sign in from a regular browser via the Telegram Login Widget."""
+    ratelimit.check("signin", ratelimit.client_ip(request))
     tg = verify_login_widget(
         body.model_dump(), _require_bot_token(), settings.telegram_auth_max_age_hours * 3600
     )
@@ -62,9 +65,10 @@ def demo_users(db: DbSession = Depends(get_db)):
 
 
 @router.post("/demo-login")
-def demo_login(body: DemoLoginIn, db: DbSession = Depends(get_db)):
+def demo_login(body: DemoLoginIn, request: Request, db: DbSession = Depends(get_db)):
     if not settings.demo_mode:
         raise ApiError("demo_disabled", 404)
+    ratelimit.check("signin", ratelimit.client_ip(request))
     user = db.get(User, body.user_id)
     if user is None or not user.is_demo:
         raise ApiError("user_not_found", 404)
@@ -92,6 +96,7 @@ async def onboarding(
 
     Teachers must attach at least one certificate / diploma and then wait for admin approval.
     """
+    ratelimit.check("onboarding", user.id)
     # (A Form() model can't be combined with File() params in FastAPI, so the model is built here.)
     try:
         body = OnboardingIn(role=role, full_name=full_name, phone=phone, bio=bio, subjects=subjects)

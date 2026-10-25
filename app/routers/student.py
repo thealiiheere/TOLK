@@ -4,6 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
+from app import ratelimit
 from app.auth import require_student
 from app.database import get_db
 from app.i18n import ApiError
@@ -129,6 +130,7 @@ async def enroll(
     db: DbSession = Depends(get_db),
 ):
     """Student pays by card transfer and uploads the receipt; the admin approves it and enrolls them."""
+    ratelimit.check("enroll", user.id)
     group = db.get(Group, group_id)
     if group is None or not group.is_published:
         raise ApiError("group_not_found", 404)
@@ -178,6 +180,7 @@ def rate_lesson(lesson_id: int, body: RatingIn, user: User = Depends(require_stu
 
 @router.post("/homework")
 def submit_homework(body: HomeworkIn, user: User = Depends(require_student), db: DbSession = Depends(get_db)):
+    ratelimit.check("homework", user.id)
     enrollment = db.get(Enrollment, (body.group_id, user.id))
     if enrollment is None:
         raise ApiError("not_enrolled", 403)

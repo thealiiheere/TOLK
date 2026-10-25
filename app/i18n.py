@@ -240,6 +240,11 @@ MESSAGES: dict[str, dict[str, str]] = {
         "ru": "Укажите корректную ссылку (http:// или https://)",
         "en": "Enter a valid link (http:// or https://)",
     },
+    "too_many_requests": {
+        "uz": "Urinishlar juda ko'p. {minutes} daqiqadan so'ng qayta urinib ko'ring",
+        "ru": "Слишком много попыток. Попробуйте снова через {minutes} мин.",
+        "en": "Too many attempts. Please try again in {minutes} min.",
+    },
     "validation_error": {
         "uz": "Ma'lumotlar noto'g'ri to'ldirilgan",
         "ru": "Данные заполнены некорректно",
@@ -337,8 +342,8 @@ MESSAGES: dict[str, dict[str, str]] = {
 
 
 class ApiError(HTTPException):
-    def __init__(self, key: str, status_code: int = 400, **params):
-        super().__init__(status_code=status_code, detail=key)
+    def __init__(self, key: str, status_code: int = 400, headers: dict[str, str] | None = None, **params):
+        super().__init__(status_code=status_code, detail=key, headers=headers)
         self.key = key
         self.params = params
 

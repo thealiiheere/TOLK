@@ -78,7 +78,9 @@ async def security_headers(request: Request, call_next):
 @app.exception_handler(ApiError)
 async def api_error_handler(request: Request, exc: ApiError):
     lang = lang_from_headers(request.headers)
-    return JSONResponse({"detail": t(exc.key, lang, **exc.params), "code": exc.key}, status_code=exc.status_code)
+    return JSONResponse(
+        {"detail": t(exc.key, lang, **exc.params), "code": exc.key}, status_code=exc.status_code, headers=exc.headers,
+    )
 
 
 @app.exception_handler(StarletteHTTPException)

@@ -548,9 +548,28 @@ class FakeRedis:
 
     def incr(self, key):
         self.data[key] = str(int(self.data.get(key, 0)) + 1)
+        return int(self.data[key])
+
+    def expire(self, key, seconds, nx=False):
+        return True
 
     def ping(self):
         return True
+
+    def pipeline(self, transaction=True):
+        fake = self
+
+        class Pipeline:
+            def __init__(self):
+                self.ops = []
+
+            def __getattr__(self, name):
+                return lambda *a, **kw: self.ops.append((name, a, kw))
+
+            def execute(self):
+                return [getattr(fake, name)(*a, **kw) for name, a, kw in self.ops]
+
+        return Pipeline()
 
 
 @pytest.fixture
@@ -627,3 +646,45 @@ def test_admin_stats_are_cached_and_forgotten_after_changes(client, fake_redis):
     assert admin.post(f"/api/admin/payments/{res.json()['id']}/review", json={"status": "approved"}).status_code == 200
     s = admin.get("/api/admin/stats").json()
     assert s["pending_payments"] == 0 and s["enrollments"] == 1 and s["revenue_total"] == 300000
+
+
+# ---------- rate limits ----------
+
+def _forged():
+    """A sign-in with a broken signature (rejected with 401)."""
+    from tests.conftest import init_data
+
+    return init_data(42).replace("Test", "Evil")
+
+
+def test_sign_in_is_rate_limited_per_ip(client, fake_redis, monkeypatch):
+    from app import ratelimit
+
+    monkeypatch.setitem(ratelimit.LIMITS, "signin", (3, 600))
+    for _ in range(3):  # failed attempts count too
+        assert client.post("/api/auth/telegram", json={"init_data": _forged()}).status_code == 401
+    res = client.post("/api/auth/telegram", json={"init_data": _forged()}, headers={"X-Lang": "ru"})
+    assert res.status_code == 429 and res.json()["code"] == "too_many_requests"
+    assert "Попробуйте снова через" in res.json()["detail"]
+    assert 0 < int(res.headers["Retry-After"]) <= 600
+
+
+def test_receipt_uploads_are_rate_limited_per_student(client, fake_redis, monkeypatch):
+    from app import ratelimit
+
+    monkeypatch.setitem(ratelimit.LIMITS, "enroll", (2, 3600))
+    admin = make_admin(client)
+    gid = make_group(admin, make_tutor(client, admin).user["id"])
+    first, second = make_student(client), make_student(client, tg_id=3001, name="Student Two")
+    for _ in range(2):
+        assert first.post("/api/student/enroll", data={"group_id": 999}, files=receipt()).status_code == 404
+    assert first.post("/api/student/enroll", data={"group_id": gid}, files=receipt()).status_code == 429
+    assert second.post("/api/student/enroll", data={"group_id": gid}, files=receipt()).status_code == 200
+
+
+def test_no_limits_without_redis(client, monkeypatch):
+    from app import ratelimit
+
+    monkeypatch.setitem(ratelimit.LIMITS, "signin", (1, 600))  # the cache is off in tests by default
+    for _ in range(3):
+        assert client.post("/api/auth/telegram", json={"init_data": _forged()}).status_code == 401
