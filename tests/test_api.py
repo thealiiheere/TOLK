@@ -503,3 +503,27 @@ def test_course_poster_validation_and_cleanup(client):
     name = upload(admin, "p.png", _image_bytes(), "image/png").json()["poster_url"].rsplit("/", 1)[1]
     assert admin.delete(f"/api/admin/groups/{gid}").status_code == 200  # deleting the class removes its poster
     assert not (Path(settings.upload_dir) / "posters" / name).exists()
+
+
+# ---------- cache ----------
+
+def test_cache_off_without_redis_url(client):
+    from app import cache
+
+    assert cache.client() is None and cache.status() == "off"
+    cache.set_json("k", {"a": 1})
+    assert cache.get_json("k") is None
+    cache.delete("k")
+    assert client.get("/health").json()["cache"] == "off"
+
+
+def test_cache_unreachable_redis_is_a_miss_not_an_error(client, monkeypatch):
+    from app import cache
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "redis_url", "redis://127.0.0.1:1/0")  # nothing listens on port 1
+    monkeypatch.setattr(cache, "_client", None)
+    cache.set_json("k", {"a": 1})
+    assert cache.get_json("k") is None
+    res = client.get("/health")  # status() → "unavailable", and the health check still passes
+    assert res.status_code == 200 and res.json()["cache"] == "unavailable"

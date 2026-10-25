@@ -22,6 +22,7 @@ os.environ.update({
     "TOLK_WEBAPP_URL": "",  # disables real Telegram notifications
     "ADMIN_TELEGRAM_IDS": str(ADMIN_TG_ID),
     "DEMO_MODE": "true",
+    "REDIS_URL": "",  # cache off: tests never touch a real Redis
 })
 
 from fastapi.testclient import TestClient  # noqa: E402

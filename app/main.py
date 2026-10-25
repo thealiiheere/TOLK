@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import cache
 from app.config import APP_VERSION, settings
 from app.database import SessionLocal
 from app.i18n import MESSAGES, ApiError, lang_from_headers, t
@@ -139,7 +140,8 @@ def health():
     except Exception:
         log.exception("Health check: database unavailable")
         return JSONResponse({"status": "error", "database": "unavailable"}, status_code=503)
-    return {"status": "ok", "version": APP_VERSION}
+    # The cache is optional: "off" / "unavailable" is reported but doesn't fail the health check.
+    return {"status": "ok", "version": APP_VERSION, "cache": cache.status()}
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

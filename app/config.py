@@ -38,6 +38,10 @@ class Settings(BaseSettings):
 
     upload_dir: Path = Field(default=PROJECT_ROOT / "data" / "uploads")
 
+    # Cache (app/cache.py). Optional: with an empty REDIS_URL the app works the same, every lookup is a miss.
+    redis_url: str = ""  # e.g. redis://localhost:6379/0
+    cache_ttl: int = 300  # seconds a cached value lives
+
     model_config = SettingsConfigDict(env_file=PROJECT_ROOT / ".env", env_file_encoding="utf-8", extra="ignore")
 
     @field_validator("telegram_bot_username")

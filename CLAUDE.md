@@ -19,7 +19,8 @@ Roles: `student`, `tutor` (shown as "teacher" in the UI), `admin`. Production: A
 
 ```bash
 python run.py                         # migrate + (demo seed if DEMO_MODE) + uvicorn --reload on :8000
-python -m pytest                      # tests/ (signed initData, temp SQLite; ~21 tests, ~10 s)
+python -m pytest                      # tests/ only (pytest.ini; signed initData, temp SQLite, cache off; ~23 tests)
+python -m app.test_redis              # Redis connection test: run AS A MODULE from the project folder, exit 0 = OK
 python -m app.seed [--reset]          # demo data; --reset drops all tables (refused in production)
 alembic revision --autogenerate -m "msg"   # after changing app/models.py, then review the file
 alembic upgrade head
@@ -47,12 +48,15 @@ app/
                  get_current_user → require_onboarded → require_admin / require_tutor / require_approved_tutor / require_student
   i18n.py        backend strings (API errors, Telegram notifications, bot welcome) in uz/ru/en; ApiError("key", status, **params)
   notify.py      best-effort Telegram messages via BackgroundTasks (never raises)
+  cache.py       optional Redis cache (REDIS_URL, CACHE_TTL): get_json / set_json / delete / status. Never raises:
+                 no URL or Redis down = miss. Keys prefixed "tolk:". NOT used by any endpoint yet.
+  test_redis.py  `python -m app.test_redis`: ping + write/read/delete round trip, prints version and memory limit
   uploads.py     file storage under upload_dir: receipts/ + certificates/ (private, admin-only download) and posters/
                  (public). Magic-byte type check, size limit, random names, read_upload() validates before
                  write_upload(); save_poster() re-encodes (fit 1280x800, WEBP, EXIF/GPS stripped)
   seed.py        demo data (+ generated receipt and certificate images, auto course codes)
   main.py        app, error handlers (translate ApiError/validation via X-Lang), security headers + CSP,
-                 /api/config, /health, static mount, index
+                 /api/config, /health (database must answer; also reports "cache": ok/off/unavailable), static mount, index
   routers/
     auth.py      /api/auth: telegram, telegram-widget, demo-users, demo-login, me (GET/PATCH), logout,
                  onboarding (MULTIPART form: role, full_name, phone, bio, subjects, certificates[])
@@ -177,7 +181,12 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
 - Before deploying a migration: `sudo -u postgres pg_dump tolk | gzip > /var/backups/tolk/before-<rev>-<date>.sql.gz`;
   for data migrations rehearse first on a copy (restore the dump into a scratch DB, run `alembic upgrade head`
   against it with DATABASE_URL overridden, then drop it).
-- Logs: `sudo journalctl -u tolk-web -f` / `-u tolk-bot`; nginx in `/var/log/nginx/`.
+- Redis 8 (`redis-server`, enabled on boot) as a local cache: settings in `/etc/redis/tolk.conf` (included at the end
+  of `/etc/redis/redis.conf`): bind 127.0.0.1:6379 only, protected-mode, `maxmemory 128mb`, `allkeys-lru`, no
+  persistence (`save ""`, no AOF). Port 6379 must never be opened in ufw or the AWS security group. App side:
+  `REDIS_URL=redis://localhost:6379/0`, `CACHE_TTL=300` in `/srv/tolk/.env`. Check: `redis-cli ping`,
+  `cd /srv/tolk && sudo -u tolk .venv/bin/python -m app.test_redis`, `curl -s localhost:8000/health`.
+- Logs: `sudo journalctl -u tolk-web -f` / `-u tolk-bot`; nginx in `/var/log/nginx/`; Redis in `/var/log/redis/`.
 - Change settings: edit `/srv/tolk/.env` with sudo, then `sudo systemctl restart tolk-web tolk-bot`.
 
 ## Gotchas
@@ -195,4 +204,5 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
 - The Browser pane often can't screenshot when the app window is hidden, and lazy images don't load there: verify
   layout with getBoundingClientRect() via javascript_tool and fetch() the image URL instead of waiting on onload.
 - `.env` in this repo points at a local Postgres and holds an old, revoked bot token; the dev launch config uses SQLite.
+- The dev box has its own Redis on 127.0.0.1:6379 (not the server's). Settings ignore unknown `.env` keys (`extra="ignore"`).
 - Runtime data lives in `data/` (gitignored); old tracked artefacts (`app/tolk.db`, `app/uploads/`) were removed from git.
