@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
+from app import cache
 from app.auth import get_current_user_optional
 from app.database import get_db
 from app.i18n import ApiError
@@ -28,6 +29,10 @@ def _public_groups():
 @router.get("/filters")
 def filters(db: DbSession = Depends(get_db)):
     """Options for the filter panel, built from what is actually in the catalog."""
+    return cache.cached(cache.catalog_key("filters"), cache.CATALOG_TTL, lambda: _filters(db))
+
+
+def _filters(db: DbSession) -> dict:
     groups = db.scalars(_public_groups()).all()
     languages: dict[str, int] = {}
     others: dict[str, tuple[str, int]] = {}
@@ -60,6 +65,15 @@ def list_groups(
     has_seats: bool = False,
     sort: Literal["rating", "price_asc", "price_desc", "newest"] = "rating",
 ):
+    wanted = sorted({s.strip().lower() for s in subjects.split(",") if s.strip()})
+    q = q.strip()
+    key = cache.catalog_key("groups", category, ",".join(wanted), price_min, price_max, min_rating, q.lower(), has_seats, sort)
+    return cache.cached(key, cache.CATALOG_TTL, lambda: _list_groups(
+        db, category, wanted, price_min, price_max, min_rating, q, has_seats, sort,
+    ))
+
+
+def _list_groups(db, category, wanted, price_min, price_max, min_rating, q, has_seats, sort) -> list[dict]:
     rating_sq = (
         select(
             LessonRating.tutor_id.label("tid"),
@@ -81,7 +95,6 @@ def list_groups(
     )
     if category:
         stmt = stmt.where(Group.category == category)
-    wanted = [s.strip().lower() for s in subjects.split(",") if s.strip()]
     if wanted:
         stmt = stmt.where(func.lower(Group.subject).in_(wanted))
     if price_min is not None:
@@ -92,8 +105,8 @@ def list_groups(
         stmt = stmt.where(avg >= min_rating)
     if has_seats:
         stmt = stmt.where(func.coalesce(count_sq.c.n, 0) < Group.max_students)
-    if q.strip():
-        like = f"%{q.strip().lower()}%"
+    if q:
+        like = f"%{q.lower()}%"
         stmt = stmt.where(or_(
             func.lower(Group.code).like(like),
             func.lower(Group.title).like(like),
@@ -139,27 +152,37 @@ def group_detail(
     db: DbSession = Depends(get_db),
     user: User | None = Depends(get_current_user_optional),
 ):
-    group = db.scalar(_public_groups().where(Group.id == group_id).options(selectinload(Group.tutor)))
-    if group is None and user is not None and user.role == "admin":
-        group = db.get(Group, group_id)
-    if group is None:
+    # The public part is cached; "my" (enrolled / payment pending) is per visitor and always read fresh.
+    data = cache.cached(cache.catalog_key("group", group_id), cache.CATALOG_TTL, lambda: _group_page(db, group_id))
+    if data is None and user is not None and user.role == "admin":
+        group = db.get(Group, group_id)  # admins may preview unpublished classes (not cached)
+        data = _group_page(db, group_id, group) if group is not None else None
+    if data is None:
         raise ApiError("group_not_found", 404)
+
+    my = {"enrolled": False, "pending_payment": False, "can_enroll": False}
+    if user is not None and user.role == "student" and user.onboarded:
+        my["enrolled"] = db.get(Enrollment, (group_id, user.id)) is not None
+        my["pending_payment"] = db.scalar(
+            select(Payment.id).where(
+                Payment.student_id == user.id, Payment.group_id == group_id, Payment.status == "pending"
+            )
+        ) is not None
+        my["can_enroll"] = not my["enrolled"] and not my["pending_payment"] and data["seats_left"] > 0
+    return {**data, "my": my}
+
+
+def _group_page(db: DbSession, group_id: int, group: Group | None = None) -> dict | None:
+    """Public class page data, or None when the class isn't in the catalog."""
+    if group is None:
+        group = db.scalar(_public_groups().where(Group.id == group_id).options(selectinload(Group.tutor)))
+    if group is None:
+        return None
     enrolled = enrolled_counts(db, [group.id]).get(group.id, 0)
     rating = tutor_ratings(db, [group.tutor_id]).get(group.tutor_id)
     data = group_card(group, enrolled, rating)
     data["reviews"] = _reviews_for_tutor(db, group.tutor_id, 10) if group.tutor_id else []
     data["rating_breakdown"] = _rating_breakdown(db, group.tutor_id) if group.tutor_id else {}
-
-    my = {"enrolled": False, "pending_payment": False, "can_enroll": False}
-    if user is not None and user.role == "student" and user.onboarded:
-        my["enrolled"] = db.get(Enrollment, (group.id, user.id)) is not None
-        my["pending_payment"] = db.scalar(
-            select(Payment.id).where(
-                Payment.student_id == user.id, Payment.group_id == group.id, Payment.status == "pending"
-            )
-        ) is not None
-        my["can_enroll"] = not my["enrolled"] and not my["pending_payment"] and data["seats_left"] > 0
-    data["my"] = my
     return data
 
 
@@ -174,9 +197,16 @@ def poster(name: str):
 
 @router.get("/tutors/{tutor_id}")
 def tutor_profile(tutor_id: int, db: DbSession = Depends(get_db)):
+    data = cache.cached(cache.catalog_key("tutor", tutor_id), cache.CATALOG_TTL, lambda: _tutor_page(db, tutor_id))
+    if data is None:
+        raise ApiError("tutor_not_found", 404)
+    return data
+
+
+def _tutor_page(db: DbSession, tutor_id: int) -> dict | None:
     tutor = db.get(User, tutor_id)
     if tutor is None or tutor.role != "tutor" or tutor.tutor_status != "approved" or tutor.is_blocked:
-        raise ApiError("tutor_not_found", 404)
+        return None
     rating = tutor_ratings(db, [tutor.id]).get(tutor.id)
     groups = db.scalars(_public_groups().where(Group.tutor_id == tutor.id).options(selectinload(Group.tutor))).all()
     counts = enrolled_counts(db, [g.id for g in groups])

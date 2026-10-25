@@ -1,5 +1,5 @@
 // Explore / catalog page with filters (category, subjects, price range, teacher rating, free seats) and sorting.
-import { api, empty, errorBox, fmtNumber, html, icon, loading, mount, on, openSheet } from '../core.js';
+import { apiFresh, empty, errorBox, fmtNumber, html, icon, loading, mount, on, openSheet } from '../core.js';
 import { subjectName, t } from '../i18n.js';
 import { classGrid } from './components.js';
 
@@ -9,6 +9,7 @@ let f = {}; // current filter values
 let alive = () => true;
 let sheet = null;
 let searchTimer = null;
+let resultsSeq = 0; // newest results request; older answers are dropped
 
 function readQuery(query) {
   return {
@@ -74,9 +75,12 @@ export async function render(view, _params, query, isAlive) {
     </div>`);
 
   try {
-    filters = await api('/api/catalog/filters');
+    await apiFresh('/api/catalog/filters', (data) => {
+      if (!alive()) return;
+      filters = data;
+      renderPanels();
+    });
     if (!alive()) return;
-    renderPanels();
     await loadResults();
   } catch (err) {
     if (alive()) mount(document.getElementById('results'), errorBox(err));
@@ -161,18 +165,19 @@ async function loadResults() {
   if (!box) return;
   history.replaceState(null, '', `#/${queryString() ? `?${queryString()}` : ''}`);
   try {
-    const groups = await api('/api/catalog/groups', {
-      query: {
-        category: f.cat, subjects: f.s.join(','), price_min: f.min, price_max: f.max,
-        min_rating: f.r || null, q: f.q, sort: f.sort, has_seats: f.seats ? 'true' : null,
-      },
-    });
-    if (!alive()) return;
-    mount(document.getElementById('results-count'), t('classes_found', { n: groups.length }));
-    const footBtn = sheet?.el.querySelector('[data-results-btn]');
-    if (footBtn) footBtn.textContent = t('show_results', { n: groups.length });
-    mount(box, groups.length ? classGrid(groups) : empty('🔎', t('no_classes_title'), t('no_classes_text'),
-      activeCount() || f.q ? html`<button class="btn btn-soft" data-action="f-clear">${t('clear_filters')}</button>` : ''));
+    const query = {
+      category: f.cat, subjects: f.s.join(','), price_min: f.min, price_max: f.max,
+      min_rating: f.r || null, q: f.q, sort: f.sort, has_seats: f.seats ? 'true' : null,
+    };
+    const seq = ++resultsSeq;
+    await apiFresh('/api/catalog/groups', (groups) => {
+      if (!alive() || seq !== resultsSeq) return; // the filters changed again meanwhile
+      mount(document.getElementById('results-count'), t('classes_found', { n: groups.length }));
+      const footBtn = sheet?.el.querySelector('[data-results-btn]');
+      if (footBtn) footBtn.textContent = t('show_results', { n: groups.length });
+      mount(box, groups.length ? classGrid(groups) : empty('🔎', t('no_classes_title'), t('no_classes_text'),
+        activeCount() || f.q ? html`<button class="btn btn-soft" data-action="f-clear">${t('clear_filters')}</button>` : ''));
+    }, { query });
   } catch (err) {
     if (alive()) mount(box, errorBox(err));
   }

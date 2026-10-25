@@ -1,6 +1,6 @@
 // Admin panel: overview, payments (receipts), classes (create / edit / students), teachers, users, discipline.
 import {
-  api, avatar, busy, codeBadge, confirmSheet, empty, errorBox, fmtDate, fmtDateTime, fmtPrice, fmtSchedule, formData, go, html, icon, loading,
+  api, avatar, busy, codeBadge, confirmSheet, empty, errorBox, fmtDate, fmtDateTime, fmtNumber, fmtPrice, fmtSchedule, formData, go, html, icon, loading,
   mount, on, openSheet, periodLabel, ratingBadge, state, strikesDots, subjectIcon, subjectInfo, toast, toastError,
 } from '../core.js';
 import { LANGUAGE_CODES, subjectName, t } from '../i18n.js';
@@ -40,6 +40,8 @@ const reload = () => go(location.hash.slice(1));
 // ---------- overview ----------
 async function overview(body) {
   const s = stats;
+  // money: the number stays whole and the currency drops below it when the tile is narrow (was cut to "995 000 …")
+  const money = (n) => html`<span>${fmtNumber(n)}</span> <small>${t('currency')}</small>`;
   const tile = (v, k, href) => html`<a class="card stat" href="${href || '#/admin'}" style="color:inherit;text-decoration:none"><div class="v">${v}</div><div class="k">${k}</div></a>`;
   mount(body, html`
     <div class="stack-lg">
@@ -50,8 +52,8 @@ async function overview(body) {
         ${tile(s.groups, t('stat_classes'), '#/admin/classes')}
         ${tile(s.enrollments, t('stat_enrollments'), '#/admin/classes')}
         ${tile(s.upcoming_lessons, t('stat_upcoming_lessons'))}
-        ${tile(fmtPrice(s.revenue_month), t('stat_revenue_month'), '#/admin/payments?status=approved')}
-        ${tile(fmtPrice(s.revenue_total), t('stat_revenue_total'), '#/admin/payments?status=approved')}
+        ${tile(money(s.revenue_month), t('stat_revenue_month'), '#/admin/payments?status=approved')}
+        ${tile(money(s.revenue_total), t('stat_revenue_total'), '#/admin/payments?status=approved')}
         ${tile(s.avg_rating ? `${s.avg_rating.toFixed(2)} ★` : '—', t('stat_avg_rating'))}
         ${tile(s.violations, t('stat_violations'), '#/admin/discipline')}
       </div>

@@ -2,6 +2,8 @@
 
 In production use the Docker setup instead (see DEPLOY.md).
 """
+import os
+
 import uvicorn
 from alembic import command
 from alembic.config import Config
@@ -16,5 +18,6 @@ if __name__ == "__main__":
 
         with SessionLocal() as db:
             seed(db)
-    print("TOLK running at http://127.0.0.1:8000")
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=not settings.is_production)
+    port = int(os.environ.get("PORT", "8000"))  # PORT=8010 when 8000 is taken by another project
+    print(f"TOLK running at http://127.0.0.1:{port}")
+    uvicorn.run("app.main:app", host="127.0.0.1", port=port, reload=not settings.is_production)

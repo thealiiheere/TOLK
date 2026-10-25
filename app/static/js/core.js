@@ -21,6 +21,7 @@ export const inTelegram = () => Boolean(state.tg && state.tg.initData);
 export function setToken(token) {
   state.token = token;
   storage.set('tolk_token', token);
+  forgetRecent(); // class pages carry the viewer's own enrollment state
 }
 
 // ---------- safe HTML templating: every interpolated value is escaped unless wrapped in raw() ----------
@@ -65,6 +66,7 @@ export async function api(path, { method = 'GET', body, form, query, blob = fals
   } catch {
     throw new ApiError(t('err_network'), 0, 'network');
   }
+  if (method !== 'GET') recent.clear(); // something changed: remembered catalog answers may be out of date
   if (res.ok && blob) return res.blob();
   const data = (res.headers.get('content-type') || '').includes('application/json') ? await res.json().catch(() => null) : null;
   if (!res.ok) {
@@ -76,6 +78,36 @@ export async function api(path, { method = 'GET', body, form, query, blob = fals
     throw new ApiError(data?.detail || t('err_generic'), res.status, data?.code);
   }
   return data;
+}
+
+// Catalog answers remembered in memory for instant repeat views (back to Explore, reopening a class).
+// Cleared after any POST/PUT/PATCH/DELETE and on sign-in/out, since class pages include "my" enrollment state.
+const recent = new Map();
+const RECENT_FRESH_MS = 30_000;
+const RECENT_MAX = 40;
+export function forgetRecent() { recent.clear(); }
+
+/**
+ * GET with stale-while-revalidate: calls render(data) at once with a remembered answer (if any), then, unless that
+ * answer is under 30 s old, fetches a fresh one and calls render again only if it changed. Throws only when there
+ * is nothing to show. render() must check the page's alive() itself.
+ */
+export async function apiFresh(path, render, { query } = {}) {
+  const key = `${path}?${JSON.stringify(query || {})}`;
+  const hit = recent.get(key);
+  if (hit) render(hit.data);
+  if (hit && Date.now() - hit.at < RECENT_FRESH_MS) return;
+  let data;
+  try {
+    data = await api(path, { query });
+  } catch (err) {
+    if (hit) return; // keep showing the remembered answer when offline
+    throw err;
+  }
+  recent.delete(key);
+  recent.set(key, { data, at: Date.now() });
+  if (recent.size > RECENT_MAX) recent.delete(recent.keys().next().value);
+  if (!hit || JSON.stringify(hit.data) !== JSON.stringify(data)) render(data);
 }
 
 // ---------- haptics ----------

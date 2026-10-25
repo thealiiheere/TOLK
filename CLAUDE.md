@@ -18,7 +18,7 @@ Roles: `student`, `tutor` (shown as "teacher" in the UI), `admin`. Production: A
 ## Commands (Windows dev box: use `.venv/Scripts/python.exe`)
 
 ```bash
-python run.py                         # migrate + (demo seed if DEMO_MODE) + uvicorn --reload on :8000
+python run.py                         # migrate + (demo seed if DEMO_MODE) + uvicorn --reload on :8000 (PORT=... to change)
 python -m pytest                      # tests/ only (pytest.ini; signed initData, temp SQLite, cache off; ~23 tests)
 python -m app.test_redis              # Redis connection test: run AS A MODULE from the project folder, exit 0 = OK
 python -m app.seed [--reset]          # demo data; --reset drops all tables (refused in production)
@@ -48,8 +48,9 @@ app/
                  get_current_user → require_onboarded → require_admin / require_tutor / require_approved_tutor / require_student
   i18n.py        backend strings (API errors, Telegram notifications, bot welcome) in uz/ru/en; ApiError("key", status, **params)
   notify.py      best-effort Telegram messages via BackgroundTasks (never raises)
-  cache.py       optional Redis cache (REDIS_URL, CACHE_TTL): get_json / set_json / delete / status. Never raises:
-                 no URL or Redis down = miss. Keys prefixed "tolk:". NOT used by any endpoint yet.
+  cache.py       optional Redis cache (REDIS_URL): get_json / set_json / delete / cached(key, ttl, fn) / status.
+                 Never raises: no URL or Redis down = miss. Keys prefixed "tolk:". Session events forget entries
+                 after commits (see "Caching" in Domain rules).
   test_redis.py  `python -m app.test_redis`: ping + write/read/delete round trip, prints version and memory limit
   uploads.py     file storage under upload_dir: receipts/ + certificates/ (private, admin-only download) and posters/
                  (public). Magic-byte type check, size limit, random names, read_upload() validates before
@@ -126,6 +127,15 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
 - **Admins**: users in `ADMIN_TELEGRAM_IDS` are promoted at sign-in AND on their next authenticated request
   (`auth.get_current_user_optional`), so editing the env var + restarting is enough.
 - **Blocking** a user deletes their sessions; blocked users get 403 `account_blocked`.
+- **Caching** (`app/cache.py`). Server (Redis): public catalog answers (`/api/catalog` filters, groups list per
+  filter combination, class page minus `my`, teacher page; 5 min) under a catalog version, and the admin overview
+  `/api/admin/stats` (one key, 60 s). Forgetting is automatic: SQLAlchemy session events note which models changed
+  (`_class_scopes`: Group / Enrollment / LessonRating / teacher Users → catalog + stats; Payment / Lesson / other
+  Users → stats) and after commit bump the catalog version / delete the stats key. Bulk `update()`/`delete()` are
+  caught too. A new model or a new cached answer that depends on other tables → extend `_class_scopes`. Never cache
+  per-user data (dashboards, `my`, payments, sessions). Browser: `apiFresh()` (core.js) remembers catalog answers
+  in memory (fresh 30 s, then shown at once and refreshed in the background); cleared by any non-GET `api()` call
+  and by `setToken`.
 
 ## Conventions
 

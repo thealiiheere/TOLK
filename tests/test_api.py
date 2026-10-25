@@ -2,6 +2,7 @@ import io
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
 from sqlalchemy import update
 
 from app.database import SessionLocal
@@ -527,3 +528,102 @@ def test_cache_unreachable_redis_is_a_miss_not_an_error(client, monkeypatch):
     assert cache.get_json("k") is None
     res = client.get("/health")  # status() → "unavailable", and the health check still passes
     assert res.status_code == 200 and res.json()["cache"] == "unavailable"
+
+
+class FakeRedis:
+    """In-memory stand-in for the few Redis commands app.cache uses (TTLs are ignored)."""
+
+    def __init__(self):
+        self.data = {}
+
+    def get(self, key):
+        return self.data.get(key)
+
+    def set(self, key, value, ex=None):
+        self.data[key] = value
+
+    def delete(self, *keys):
+        for k in keys:
+            self.data.pop(k, None)
+
+    def incr(self, key):
+        self.data[key] = str(int(self.data.get(key, 0)) + 1)
+
+    def ping(self):
+        return True
+
+
+@pytest.fixture
+def fake_redis(monkeypatch):
+    from app import cache
+    from app.config import settings
+
+    fake = FakeRedis()
+    monkeypatch.setattr(settings, "redis_url", "redis://fake")
+    monkeypatch.setattr(cache, "_client", fake)
+    return fake
+
+
+def _raw_price(group_id, price):
+    """Change the database behind the app's back (no session events), to see whether an answer came from the cache."""
+    from sqlalchemy import text
+
+    from app.database import engine
+
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE groups SET price = :p WHERE id = :id"), {"p": price, "id": group_id})
+
+
+def test_catalog_is_cached_and_forgotten_after_changes(client, fake_redis):
+    admin = make_admin(client)
+    tutor = make_tutor(client, admin)
+    gid = make_group(admin, tutor.user["id"], price=300000)
+    price = lambda: client.get("/api/catalog/groups").json()[0]["price"]  # noqa: E731
+    page = lambda: client.get(f"/api/catalog/groups/{gid}").json()  # noqa: E731
+
+    assert price() == 300000 and page()["price"] == 300000
+    _raw_price(gid, 1)
+    assert price() == 300000 and page()["price"] == 300000  # served from the cache
+
+    # an edit through the app forgets every catalog answer at once
+    body = {"title": "English Club", "category": "language", "subject": "en", "level": "B1", "price": 250000,
+            "price_period": "month", "schedule": "Mon 19:00", "max_students": 5, "tutor_id": tutor.user["id"]}
+    assert admin.put(f"/api/admin/groups/{gid}", json=body).status_code == 200
+    assert price() == 250000 and page()["price"] == 250000
+
+    # an enrollment changes the seats everywhere right away
+    student = make_student(client)
+    assert page()["seats_left"] == 5
+    enroll_and_approve(admin, student, gid)
+    assert page()["seats_left"] == 4
+    assert client.get("/api/catalog/groups").json()[0]["seats_left"] == 4
+    assert client.get(f"/api/catalog/tutors/{tutor.user['id']}").json()["groups"][0]["seats_left"] == 4
+    # the per-visitor part is never cached
+    assert student.get(f"/api/catalog/groups/{gid}").json()["my"]["enrolled"] is True
+    assert client.get(f"/api/catalog/groups/{gid}").json()["my"]["enrolled"] is False
+
+
+def test_student_sign_in_keeps_the_catalog_cache(client, fake_redis):
+    admin = make_admin(client)
+    gid = make_group(admin, make_tutor(client, admin).user["id"])
+    client.get("/api/catalog/groups")
+    version = fake_redis.get("tolk:catalog:version")
+    make_student(client, tg_id=3100)
+    Api(client, 3100, "Student One").get("/api/auth/me")
+    assert fake_redis.get("tolk:catalog:version") == version
+    assert client.get(f"/api/catalog/groups/{gid}").status_code == 200
+
+
+def test_admin_stats_are_cached_and_forgotten_after_changes(client, fake_redis):
+    admin = make_admin(client)
+    gid = make_group(admin, make_tutor(client, admin).user["id"])
+    assert admin.get("/api/admin/stats").json()["pending_payments"] == 0
+    assert "tolk:admin:stats" in fake_redis.data
+
+    student = make_student(client)
+    res = student.post("/api/student/enroll", data={"group_id": gid}, files=receipt())
+    assert res.status_code == 200
+    assert admin.get("/api/admin/stats").json()["pending_payments"] == 1  # never a stale "0 to review"
+    assert admin.post(f"/api/admin/payments/{res.json()['id']}/review", json={"status": "approved"}).status_code == 200
+    s = admin.get("/api/admin/stats").json()
+    assert s["pending_payments"] == 0 and s["enrollments"] == 1 and s["revenue_total"] == 300000

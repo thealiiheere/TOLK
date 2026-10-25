@@ -1,6 +1,6 @@
 // Public class page, teacher profile page, and the enroll (pay + upload receipt) sheet.
 import {
-  api, avatar, busy, codeBadge, coverInner, empty, errorBox, fmtPrice, fmtSchedule, go, html, icon, loading, mount, on, openSheet, periodLabel,
+  api, apiFresh, avatar, busy, codeBadge, coverInner, empty, errorBox, fmtPrice, fmtSchedule, go, html, icon, loading, mount, on, openSheet, periodLabel,
   ratingBadge, state, subjectInfo, toast, toastError,
 } from '../core.js';
 import { t } from '../i18n.js';
@@ -20,14 +20,14 @@ function cta(g) {
 
 export async function renderClass(view, params, _query, alive) {
   mount(view, html`<div class="container">${loading()}</div>`);
-  let g;
   try {
-    g = await api(`/api/catalog/groups/${params.id}`);
+    await apiFresh(`/api/catalog/groups/${params.id}`, (g) => { if (alive()) drawClass(view, g); });
   } catch (err) {
     if (alive()) mount(view, html`<div class="container">${errorBox(err)}</div>`);
-    return;
   }
-  if (!alive()) return;
+}
+
+function drawClass(view, g) {
   current = g;
   const s = subjectInfo(g);
   const tutor = g.tutor;
@@ -86,14 +86,14 @@ export async function renderClass(view, params, _query, alive) {
 
 export async function renderTeacher(view, params, _query, alive) {
   mount(view, html`<div class="container">${loading()}</div>`);
-  let tutor;
   try {
-    tutor = await api(`/api/catalog/tutors/${params.id}`);
+    await apiFresh(`/api/catalog/tutors/${params.id}`, (tutor) => { if (alive()) drawTeacher(view, tutor); });
   } catch (err) {
     if (alive()) mount(view, html`<div class="container">${errorBox(err)}</div>`);
-    return;
   }
-  if (!alive()) return;
+}
+
+function drawTeacher(view, tutor) {
   mount(view, html`
     <div class="container stack-lg">
       <div class="card card-pad">

@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
+from app import cache
 from app.auth import require_admin
 from app.database import get_db
 from app.i18n import ApiError
@@ -48,6 +49,11 @@ def _enroll(db: DbSession, group: Group, student: User) -> None:
 
 @router.get("/stats")
 def stats(_: User = Depends(require_admin), db: DbSession = Depends(get_db)):
+    # Cached for everyone with admin access; forgotten after any change it counts (see app/cache.py)
+    return cache.cached(cache.STATS_KEY, cache.STATS_TTL, lambda: _stats(db))
+
+
+def _stats(db: DbSession) -> dict:
     def count(stmt):
         return int(db.scalar(stmt) or 0)  # SUM() is Decimal on PostgreSQL
 
