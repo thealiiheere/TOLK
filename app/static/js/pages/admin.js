@@ -404,12 +404,14 @@ async function users(body, query, alive) {
       <input type="hidden" name="role" value="${role}">
     </form>
     ${list.length ? html`<div class="card card-pad list">${list.map((u) => html`
-      <div class="list-item">${avatar(u)}<div class="grow"><div class="bold small">${u.full_name}
+      <div class="list-item" style="align-items:flex-start">${avatar(u)}<div class="grow"><div class="bold small">${u.full_name}
           ${u.is_blocked ? html`<span class="badge badge-danger">${t('blocked')}</span>` : ''}</div>
-        <div class="tiny muted">${t(`role_${u.role}`)}${u.phone ? ` · ${u.phone}` : ''}${u.telegram_username ? ` · ${u.telegram_username}` : ''} · ${fmtDate(u.created_at)}</div></div>
-        ${u.role !== 'admin' ? html`<button class="btn ${u.is_blocked ? 'btn-outline' : 'btn-danger-soft'} btn-sm" data-action="user-block" data-id="${u.id}" data-v="${u.is_blocked ? '0' : '1'}">
-          ${u.is_blocked ? t('unblock') : t('block')}</button>` : ''}
-      </div>`)}</div>` : html`<div class="card">${empty('👤', t('no_users_found'))}</div>`}`);
+        <div class="tiny muted">${t(`role_${u.role}`)}${u.role === 'tutor' && u.group_ids.length ? ` + ${t('also_studies')}` : ''}${u.phone ? ` · ${u.phone}` : ''}${u.telegram_username ? ` · ${u.telegram_username}` : ''} · ${fmtDate(u.created_at)}</div>
+        ${u.role !== 'admin' ? html`<div class="row-wrap" style="margin-top:8px;gap:8px">
+          ${u.role === 'tutor' ? html`<button class="btn btn-outline btn-sm" data-action="teacher-remove" data-id="${u.id}">${t('remove_teacher')}</button>` : ''}
+          <button class="btn ${u.is_blocked ? 'btn-outline' : 'btn-danger-soft'} btn-sm" data-action="user-block" data-id="${u.id}" data-v="${u.is_blocked ? '0' : '1'}">
+            ${u.is_blocked ? t('unblock') : t('block')}</button></div>` : ''}
+      </div></div>`)}</div>` : html`<div class="card">${empty('👤', t('no_users_found'))}</div>`}`);
 }
 on('users-search', (form) => go(`/admin/users?role=${form.role.value}&q=${encodeURIComponent(form.q.value.trim())}`));
 on('user-block', async (el) => {
@@ -417,6 +419,15 @@ on('user-block', async (el) => {
   if (block && !(await confirmSheet(t('block_confirm'), { okText: t('block'), danger: true }))) return;
   try {
     await api(`/api/admin/users/${el.dataset.id}/block`, { method: 'POST', body: { is_blocked: block } });
+    toast(t('saved'), 'success');
+    reload();
+  } catch (err) { toastError(err); }
+});
+
+on('teacher-remove', async (el) => {
+  if (!(await confirmSheet(t('remove_teacher_confirm'), { okText: t('remove_teacher'), danger: true }))) return;
+  try {
+    await api(`/api/admin/users/${el.dataset.id}/remove-teacher`, { method: 'POST' });
     toast(t('saved'), 'success');
     reload();
   } catch (err) { toastError(err); }

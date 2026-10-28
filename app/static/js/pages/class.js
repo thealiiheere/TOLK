@@ -11,7 +11,8 @@ let current = null; // group shown on the class page
 function cta(g) {
   const u = state.user;
   if (!u) return html`<button class="btn btn-primary btn-lg btn-block" data-action="go-login" data-next="/class/${g.id}">${t('sign_in_to_enroll')}</button>`;
-  if (u.role !== 'student') return html`<div class="notice notice-info small"><span class="ico">ℹ️</span><div>${t('only_students_enroll')}</div></div>`;
+  if (u.role !== 'student' && u.role !== 'tutor') return html`<div class="notice notice-info small"><span class="ico">ℹ️</span><div>${t('only_students_enroll')}</div></div>`;
+  if (g.my.own_class) return html`<a class="btn btn-outline btn-lg btn-block" href="#/teach">🧑‍🏫 ${t('you_teach_this_class')}</a>`;
   if (g.my.enrolled) return html`<a class="btn btn-success btn-lg btn-block" href="#/my">${icon('check')} ${t('you_are_enrolled')}</a>`;
   if (g.my.pending_payment) return html`<button class="btn btn-outline btn-lg btn-block" disabled>⏳ ${t('payment_under_review')}</button>`;
   if (g.seats_left === 0) return html`<button class="btn btn-outline btn-lg btn-block" disabled>${t('class_full')}</button>`;

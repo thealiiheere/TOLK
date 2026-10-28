@@ -179,7 +179,8 @@ def require_approved_tutor(user: User = Depends(require_tutor)) -> User:
     return user
 
 
-def require_student(user: User = Depends(require_onboarded)) -> User:
-    if user.role != "student":
+def require_learner(user: User = Depends(require_onboarded)) -> User:
+    """Anyone who can study: students, and teachers (any approval status) who also take classes."""
+    if user.role not in ("student", "tutor"):
         raise ApiError("forbidden", 403)
     return user

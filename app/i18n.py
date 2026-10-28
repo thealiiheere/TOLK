@@ -70,6 +70,21 @@ MESSAGES: dict[str, dict[str, str]] = {
     "lesson_not_found": {"uz": "Dars topilmadi", "ru": "Урок не найден", "en": "Lesson not found"},
     "payment_not_found": {"uz": "To'lov topilmadi", "ru": "Платёж не найден", "en": "Payment not found"},
     "student_not_found": {"uz": "O'quvchi topilmadi", "ru": "Ученик не найден", "en": "Student not found"},
+    "own_class": {
+        "uz": "O'zingiz dars beradigan kursga yozila olmaysiz",
+        "ru": "Нельзя записаться на собственный курс",
+        "en": "You can't enroll in a class you teach",
+    },
+    "already_teacher": {
+        "uz": "Siz allaqachon o'qituvchi sifatida ro'yxatdan o'tgansiz",
+        "ru": "Вы уже зарегистрированы как преподаватель",
+        "en": "You are already registered as a teacher",
+    },
+    "tutor_has_classes": {
+        "uz": "Bu o'qituvchida {n} ta kurs bor. Avval kurslarni boshqa o'qituvchiga bering",
+        "ru": "У этого преподавателя курсов: {n}. Сначала передайте их другому преподавателю",
+        "en": "This teacher has {n} class(es). Assign them to another teacher first",
+    },
     "tutor_not_found": {
         "uz": "O'qituvchi topilmadi yoki tasdiqlanmagan",
         "ru": "Преподаватель не найден или не одобрен",
@@ -295,6 +310,11 @@ MESSAGES: dict[str, dict[str, str]] = {
         "uz": "Afsuski, o'qituvchi arizangiz rad etildi. {reason}\nIlovada yangi hujjatlarni yuklab, qayta ariza berishingiz mumkin.",
         "ru": "К сожалению, ваша заявка преподавателя отклонена. {reason}\nВы можете загрузить новые документы в приложении и подать заявку снова.",
         "en": "Unfortunately, your teacher application was declined. {reason}\nYou can upload new documents in the app to apply again.",
+    },
+    "n_tutor_removed": {
+        "uz": "Sizning o'qituvchi profilingiz administrator tomonidan o'chirildi. Kurslaringiz va darslaringiz saqlanib qoladi; xohlasangiz, profil sahifasida qayta ariza berishingiz mumkin.",
+        "ru": "Администратор отключил ваш профиль преподавателя. Ваши курсы как ученика сохранены; при желании можно снова подать заявку на странице профиля.",
+        "en": "An admin removed your teacher profile. Your classes as a student stay; you can apply again from your profile page.",
     },
     "n_group_assigned": {
         "uz": "📚 Sizga yangi guruh biriktirildi: «{group}».",

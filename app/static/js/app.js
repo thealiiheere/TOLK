@@ -17,7 +17,7 @@ route('/teacher/:id', catalog.renderTeacher, { tab: 'explore', back: true });
 route('/login', account.renderLogin, { tab: 'login', guest: true });
 route('/welcome', account.renderOnboarding, { auth: true });
 route('/profile', account.renderProfile, { tab: 'profile', auth: true });
-route('/my', student.render, { tab: 'my', role: 'student' });
+route('/my', student.render, { tab: 'my', role: ['student', 'tutor'] }); // teachers may study too
 route('/teach', tutor.render, { tab: 'teach', role: 'tutor' });
 route('/admin', admin.render, { tab: 'admin', role: 'admin' });
 route('/admin/:tab', admin.render, { tab: 'admin', role: 'admin', back: true });
@@ -84,7 +84,11 @@ function navItems() {
   const items = [{ tab: 'explore', href: '#/', icon: 'compass', label: t('nav_explore') }];
   if (!u) items.push({ tab: 'login', href: '#/login', icon: 'login', label: t('nav_sign_in'), mobileOnly: true });
   else if (u.onboarded && u.role === 'student') items.push({ tab: 'my', href: '#/my', icon: 'book', label: t('nav_my_learning') });
-  else if (u.onboarded && u.role === 'tutor') items.push({ tab: 'teach', href: '#/teach', icon: 'board', label: t('nav_teaching') });
+  else if (u.onboarded && u.role === 'tutor') {
+    // teachers can also take classes: both sides get a tab
+    items.push({ tab: 'teach', href: '#/teach', icon: 'board', label: t('nav_teaching') });
+    items.push({ tab: 'my', href: '#/my', icon: 'book', label: t('nav_my_learning') });
+  }
   else if (u.onboarded && u.role === 'admin') items.push({ tab: 'admin', href: '#/admin', icon: 'shield', label: t('nav_admin') });
   if (u?.onboarded) items.push({ tab: 'profile', href: '#/profile', icon: 'user', label: t('nav_profile'), mobileOnly: true });
   return items;
@@ -130,7 +134,7 @@ async function renderRoute() {
   const u = state.user;
   if (u && !u.onboarded && path !== '/welcome') return go('/welcome');
   if ((r.auth || r.role) && !u) return go(`/login?next=${encodeURIComponent(path)}`);
-  if (r.role && u.role !== r.role) return go(homeFor(u));
+  if (r.role && ![r.role].flat().includes(u.role)) return go(homeFor(u));
   if (r.guest && u) return go(homeFor(u));
 
   document.querySelectorAll('details.dropdown[open]').forEach((d) => { d.open = false; });

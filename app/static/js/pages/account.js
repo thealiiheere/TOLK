@@ -1,7 +1,7 @@
 // Sign in, first-time sign-up (student or teacher) and profile settings.
 import {
   api, avatar, busy, completeLogin, errorBox, formData, go, homeFor, html, icon, inTelegram, loading, mount, on,
-  setToken, setUser, state, storage, toast, toastError,
+  openSheet, setToken, setUser, state, storage, toast, toastError,
 } from '../core.js';
 import { LANGS, getLang, setLang, t } from '../i18n.js';
 import { certificatesError, certificatesField } from './components.js';
@@ -179,12 +179,51 @@ export function renderProfile(view) {
           <div class="row-wrap"><button class="btn btn-primary" type="submit">${t('save')}</button>
             ${u.role === 'tutor' && u.tutor_status === 'approved' ? html`<a class="btn btn-outline" href="#/teacher/${u.id}">${t('view_public_profile')}</a>` : ''}</div>
         </form>
+        ${u.role === 'student' ? html`<div class="notice notice-info"><span class="ico">🧑‍🏫</span>
+          <div class="grow stack" style="gap:8px"><div><div class="bold">${t('become_teacher_title')}</div>
+            <div class="small">${t('become_teacher_text')}</div></div>
+            <div><button class="btn btn-primary btn-sm" data-action="teacher-apply-open">${t('become_teacher')}</button></div></div></div>` : ''}
         ${state.config.support_contact ? html`<div class="notice notice-info small"><span class="ico">💬</span><div>${t('support_text', { contact: state.config.support_contact })}</div></div>` : ''}
         <div class="divider" style="margin:0"></div>
         <button class="btn btn-danger-soft" data-action="logout">${icon('logout')} ${t('sign_out')}</button>
       </div>
     </div>`);
 }
+
+// ---------- a student applies to teach as well (keeps their classes) ----------
+let applySheet = null;
+on('teacher-apply-open', () => {
+  applySheet = openSheet({
+    title: t('become_teacher'),
+    body: html`<form class="stack" data-submit="teacher-apply">
+      <p class="small muted">${t('become_teacher_text')}</p>
+      <label class="field"><span>${t('subjects_you_teach')}</span><input class="input" name="subjects" maxlength="255" placeholder="${t('subjects_placeholder')}"></label>
+      <label class="field"><span>${t('about_you')}</span><textarea class="textarea" name="bio" maxlength="1500" placeholder="${t('bio_placeholder')}"></textarea>
+        <span class="hint">${t('bio_hint')}</span></label>
+      ${certificatesField()}
+      <div class="notice notice-info small"><span class="ico">🛡️</span><div>${t('tutor_review_note')}</div></div>
+      <button class="btn btn-primary btn-lg btn-block" type="submit">${t('send_application')}</button>
+    </form>`,
+  });
+});
+on('teacher-apply', async (form) => {
+  const data = formData(form);
+  if ((data.bio || '').trim().length < 20 || !(data.subjects || '').trim()) return toast(t('tutor_fields_required'), 'warning');
+  const certError = certificatesError(form.certificates.files);
+  if (certError) return toast(certError, 'warning');
+  const fd = new FormData();
+  fd.append('subjects', data.subjects);
+  fd.append('bio', data.bio);
+  [...form.certificates.files].forEach((f) => fd.append('certificates', f));
+  await busy(form.querySelector('[type=submit]'), async () => {
+    try {
+      setUser(await api('/api/auth/teacher-application', { method: 'POST', form: fd }));
+      applySheet?.close();
+      toast(t('tutor_application_sent'), 'success');
+      go('/teach');
+    } catch (err) { toastError(err); }
+  });
+});
 
 on('profile-save', async (form) => {
   const data = formData(form);

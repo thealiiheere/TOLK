@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
 from app import ratelimit
-from app.auth import require_student
+from app.auth import require_learner
 from app.database import get_db
 from app.i18n import ApiError
 from app.models import Enrollment, Group, HomeworkSubmission, Lesson, LessonRating, LessonRecord, Payment, User, utcnow
@@ -34,7 +34,7 @@ def _ratable(db: DbSession, user: User, lesson: Lesson) -> str | None:
 
 
 @router.get("/dashboard")
-def dashboard(user: User = Depends(require_student), db: DbSession = Depends(get_db)):
+def dashboard(user: User = Depends(require_learner), db: DbSession = Depends(get_db)):
     enrollments = db.scalars(
         select(Enrollment)
         .where(Enrollment.student_id == user.id)
@@ -126,7 +126,7 @@ async def enroll(
     background: BackgroundTasks,
     group_id: int = Form(...),
     receipt: UploadFile | None = File(None),
-    user: User = Depends(require_student),
+    user: User = Depends(require_learner),
     db: DbSession = Depends(get_db),
 ):
     """Student pays by card transfer and uploads the receipt; the admin approves it and enrolls them."""
@@ -137,6 +137,8 @@ async def enroll(
     tutor = group.tutor
     if tutor is None or tutor.tutor_status != "approved":
         raise ApiError("group_unavailable")
+    if group.tutor_id == user.id:
+        raise ApiError("own_class")
     if db.get(Enrollment, (group.id, user.id)) is not None:
         raise ApiError("already_enrolled", 409)
     pending = db.scalar(select(Payment.id).where(
@@ -159,7 +161,7 @@ async def enroll(
 
 
 @router.post("/lessons/{lesson_id}/rate")
-def rate_lesson(lesson_id: int, body: RatingIn, user: User = Depends(require_student), db: DbSession = Depends(get_db)):
+def rate_lesson(lesson_id: int, body: RatingIn, user: User = Depends(require_learner), db: DbSession = Depends(get_db)):
     lesson = db.get(Lesson, lesson_id)
     if lesson is None:
         raise ApiError("lesson_not_found", 404)
@@ -179,7 +181,7 @@ def rate_lesson(lesson_id: int, body: RatingIn, user: User = Depends(require_stu
 
 
 @router.post("/homework")
-def submit_homework(body: HomeworkIn, user: User = Depends(require_student), db: DbSession = Depends(get_db)):
+def submit_homework(body: HomeworkIn, user: User = Depends(require_learner), db: DbSession = Depends(get_db)):
     ratelimit.check("homework", user.id)
     enrollment = db.get(Enrollment, (body.group_id, user.id))
     if enrollment is None:

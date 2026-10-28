@@ -688,3 +688,74 @@ def test_no_limits_without_redis(client, monkeypatch):
     monkeypatch.setitem(ratelimit.LIMITS, "signin", (1, 600))  # the cache is off in tests by default
     for _ in range(3):
         assert client.post("/api/auth/telegram", json={"init_data": _forged()}).status_code == 401
+
+
+# ---------- one account, both roles ----------
+
+def _apply_to_teach(user, files=None, **fields):
+    data = {"subjects": "Math", "bio": "I have taught school math for six years.", **fields}
+    return user.post("/api/auth/teacher-application", data=data, files=certificates() if files is None else files)
+
+
+def test_student_applies_to_teach_and_keeps_studying(client, fresh_db):
+    admin = make_admin(client)
+    tutor = make_tutor(client, admin)
+    gid = make_group(admin, tutor.user["id"])
+    student = make_student(client)
+    enroll_and_approve(admin, student, gid)
+
+    assert _apply_to_teach(student, files=[]).json()["code"] == "certificates_required"
+    assert _apply_to_teach(student, bio="short").json()["code"] == "tutor_profile_incomplete"
+    res = _apply_to_teach(student)
+    assert res.status_code == 200, res.text
+    me = res.json()
+    assert me["role"] == "tutor" and me["tutor_status"] == "pending" and me["subjects"] == "Math"
+    assert any("Student One" in text for _, text in fresh_db)  # admins were told about the application
+    assert _apply_to_teach(student).json()["code"] == "already_teacher"
+
+    # still a learner: the class and its dashboard stay
+    dash = student.get("/api/student/dashboard")
+    assert dash.status_code == 200 and [c["id"] for c in dash.json()["classes"]] == [gid]
+    # pending teacher sees the teacher side, can't schedule yet
+    assert student.get("/api/tutor/dashboard").status_code == 200
+    assert admin.get("/api/admin/stats").json()["students"] == 1  # still counted as a learner
+
+    assert admin.post(f"/api/admin/tutors/{student.user['id']}/decision", json={"status": "approved"}).status_code == 200
+    own = make_group(admin, student.user["id"], title="Math Basics", category="other", subject="Math")
+    page = student.get(f"/api/catalog/groups/{own}").json()["my"]
+    assert page["own_class"] is True and page["can_enroll"] is False
+    res = student.post("/api/student/enroll", data={"group_id": own}, files=receipt())
+    assert res.status_code == 400 and res.json()["code"] == "own_class"
+    other = make_student(client, tg_id=3002, name="Student Three")
+    assert admin.post(f"/api/admin/groups/{own}/students", json={"student_id": student.user["id"]}).json()["code"] == "own_class"
+    assert admin.post(f"/api/admin/groups/{own}/students", json={"student_id": other.user["id"]}).status_code == 200
+
+
+def test_teacher_can_enroll_in_another_teachers_class(client):
+    admin = make_admin(client)
+    t1 = make_tutor(client, admin)
+    t2 = make_tutor(client, admin, tg_id=2001, name="Teacher Two")
+    gid = make_group(admin, t1.user["id"])
+    assert t2.get(f"/api/catalog/groups/{gid}").json()["my"]["can_enroll"] is True
+    enroll_and_approve(admin, t2, gid)
+    assert [c["id"] for c in t2.get("/api/student/dashboard").json()["classes"]] == [gid]
+    users = {u["id"]: u for u in admin.get("/api/admin/users").json()}
+    assert users[t2.user["id"]]["group_ids"] == [gid]
+
+
+def test_admin_removes_teacher_access(client, fresh_db):
+    admin = make_admin(client)
+    tutor = make_tutor(client, admin)
+    gid = make_group(admin, tutor.user["id"])
+    res = admin.post(f"/api/admin/users/{tutor.user['id']}/remove-teacher")
+    assert res.status_code == 409 and res.json()["code"] == "tutor_has_classes"
+
+    assert admin.delete(f"/api/admin/groups/{gid}").status_code == 200
+    assert admin.post(f"/api/admin/users/{tutor.user['id']}/remove-teacher").status_code == 200
+    me = tutor.get("/api/auth/me").json()
+    assert me["role"] == "student" and me["tutor_status"] is None
+    assert tutor.get("/api/tutor/dashboard").status_code == 403
+    assert tutor.get("/api/student/dashboard").status_code == 200
+    assert _apply_to_teach(tutor).json()["tutor_status"] == "pending"  # may apply again
+    student = make_student(client)
+    assert admin.post(f"/api/admin/users/{student.user['id']}/remove-teacher").status_code == 404

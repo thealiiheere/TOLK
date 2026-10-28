@@ -160,15 +160,18 @@ def group_detail(
     if data is None:
         raise ApiError("group_not_found", 404)
 
-    my = {"enrolled": False, "pending_payment": False, "can_enroll": False}
-    if user is not None and user.role == "student" and user.onboarded:
+    my = {"enrolled": False, "pending_payment": False, "can_enroll": False, "own_class": False}
+    if user is not None and user.role in ("student", "tutor") and user.onboarded:  # teachers may study too
+        my["own_class"] = bool(data["tutor"]) and data["tutor"]["id"] == user.id
         my["enrolled"] = db.get(Enrollment, (group_id, user.id)) is not None
         my["pending_payment"] = db.scalar(
             select(Payment.id).where(
                 Payment.student_id == user.id, Payment.group_id == group_id, Payment.status == "pending"
             )
         ) is not None
-        my["can_enroll"] = not my["enrolled"] and not my["pending_payment"] and data["seats_left"] > 0
+        my["can_enroll"] = (
+            not my["own_class"] and not my["enrolled"] and not my["pending_payment"] and data["seats_left"] > 0
+        )
     return {**data, "my": my}
 
 

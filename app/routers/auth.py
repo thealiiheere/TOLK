@@ -5,7 +5,7 @@ from sqlalchemy import case, select
 from sqlalchemy.orm import Session as DbSession
 
 from app.auth import (
-    bearer_token, create_session, delete_session, get_current_user, upsert_telegram_user,
+    bearer_token, create_session, delete_session, get_current_user, require_onboarded, upsert_telegram_user,
     verify_login_widget, verify_webapp_init_data,
 )
 from app import ratelimit
@@ -119,6 +119,33 @@ async def onboarding(
     db.commit()
     if body.role == "tutor":
         background.add_task(notify, admin_recipients(db), "n_admin_tutor", name=user.full_name, n=len(docs))
+    return user_me(user)
+
+
+@router.post("/teacher-application")
+async def teacher_application(
+    background: BackgroundTasks,
+    subjects: str = Form(""),
+    bio: str = Form(""),
+    certificates: list[UploadFile] = File(default=[]),
+    user: User = Depends(require_onboarded),
+    db: DbSession = Depends(get_db),
+):
+    """A student applies to teach as well: same rules as signing up as a teacher. Their classes stay."""
+    ratelimit.check("onboarding", user.id)
+    if user.role != "student":
+        raise ApiError("already_teacher", 409) if user.role == "tutor" else ApiError("forbidden", 403)
+    try:  # same field rules as the sign-up form
+        body = OnboardingIn(role="tutor", full_name=user.full_name, bio=bio, subjects=subjects)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from None
+    if len(body.bio) < 20 or not body.subjects:
+        raise ApiError("tutor_profile_incomplete")
+    docs = await add_tutor_documents(db, user, certificates)
+    user.role, user.tutor_status, user.tutor_review_note = "tutor", "pending", ""
+    user.bio, user.tutor_subjects = body.bio, body.subjects
+    db.commit()
+    background.add_task(notify, admin_recipients(db), "n_admin_tutor", name=user.full_name, n=len(docs))
     return user_me(user)
 
 

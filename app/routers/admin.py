@@ -61,7 +61,10 @@ def _stats(db: DbSession) -> dict:
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     avg = db.scalar(select(func.avg(LessonRating.stars)))
     return {
-        "students": count(select(func.count()).select_from(User).where(User.role == "student", User.onboarded.is_(True))),
+        # learners: students, plus teachers who are enrolled somewhere themselves
+        "students": count(select(func.count()).select_from(User).where(User.onboarded.is_(True), or_(
+            User.role == "student", User.id.in_(select(Enrollment.student_id)),
+        ))),
         "tutors": count(select(func.count()).select_from(User).where(User.role == "tutor", User.tutor_status == "approved")),
         "pending_tutors": count(select(func.count()).select_from(User).where(User.role == "tutor", User.tutor_status == "pending")),
         "groups": count(select(func.count()).select_from(Group)),
@@ -265,8 +268,10 @@ def add_student(group_id: int, body: AssignStudentIn, _: User = Depends(require_
     if group is None:
         raise ApiError("group_not_found", 404)
     student = db.get(User, body.student_id)
-    if student is None or student.role != "student":
+    if student is None or student.role not in ("student", "tutor"):  # teachers may study too
         raise ApiError("student_not_found", 404)
+    if group.tutor_id == student.id:
+        raise ApiError("own_class")
     if db.get(Enrollment, (group.id, student.id)) is not None:
         raise ApiError("already_enrolled_admin", 409)
     _enroll(db, group, student)
@@ -382,6 +387,21 @@ def block_user(user_id: int, body: BlockIn, admin: User = Depends(require_admin)
     if body.is_blocked:
         db.execute(delete(Session).where(Session.user_id == user.id))
     db.commit()
+    return {"ok": True}
+
+
+@router.post("/users/{user_id}/remove-teacher")
+def remove_teacher(user_id: int, background: BackgroundTasks, _: User = Depends(require_admin), db: DbSession = Depends(get_db)):
+    """Turn a teacher (any status) back into a plain student; their own enrollments stay. They may apply again."""
+    user = db.get(User, user_id)
+    if user is None or user.role != "tutor":
+        raise ApiError("tutor_not_found", 404)
+    teaches = db.scalar(select(func.count()).select_from(Group).where(Group.tutor_id == user.id))
+    if teaches:
+        raise ApiError("tutor_has_classes", 409, n=teaches)
+    user.role, user.tutor_status, user.tutor_review_note = "student", None, ""
+    db.commit()
+    background.add_task(notify, _recipient(user), "n_tutor_removed")
     return {"ok": True}
 
 

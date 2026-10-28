@@ -19,7 +19,7 @@ Roles: `student`, `tutor` (shown as "teacher" in the UI), `admin`. Production: A
 
 ```bash
 python run.py                         # migrate + (demo seed if DEMO_MODE) + uvicorn --reload on :8000 (PORT=... to change)
-python -m pytest                      # tests/ only (pytest.ini; signed initData, temp SQLite, cache off or FakeRedis; ~29 tests)
+python -m pytest                      # tests/ only (pytest.ini; signed initData, temp SQLite, cache off or FakeRedis; ~32 tests)
 python -m app.test_redis              # Redis connection test: run AS A MODULE from the project folder, exit 0 = OK
 python -m app.seed [--reset]          # demo data; --reset drops all tables (refused in production)
 alembic revision --autogenerate -m "msg"   # after changing app/models.py, then review the file
@@ -45,7 +45,7 @@ app/
                  + dict serializers (user_me, group_card, tutor_card, lesson_dict, review_dict, document_dict).
                  API response shapes live HERE.
   auth.py        Telegram signature checks, upsert_telegram_user, sessions, guards:
-                 get_current_user → require_onboarded → require_admin / require_tutor / require_approved_tutor / require_student
+                 get_current_user → require_onboarded → require_admin / require_tutor / require_approved_tutor / require_learner
   i18n.py        backend strings (API errors, Telegram notifications, bot welcome) in uz/ru/en; ApiError("key", status, **params)
   notify.py      best-effort Telegram messages via BackgroundTasks (never raises)
   cache.py       optional Redis cache (REDIS_URL): get_json / set_json / delete / cached(key, ttl, fn) / status.
@@ -61,7 +61,8 @@ app/
                  /api/config, /health (database must answer; also reports "cache": ok/off/unavailable), static mount, index
   routers/
     auth.py      /api/auth: telegram, telegram-widget, demo-users, demo-login, me (GET/PATCH), logout,
-                 onboarding (MULTIPART form: role, full_name, phone, bio, subjects, certificates[])
+                 onboarding (MULTIPART form: role, full_name, phone, bio, subjects, certificates[]),
+                 teacher-application (MULTIPART: subjects, bio, certificates[]; a student applies to teach)
     catalog.py   /api/catalog (public): filters, groups (filters + sort + q search), groups/{id}, tutors/{id},
                  posters/{name} (immutable cache)
     student.py   /api/student: dashboard, enroll (multipart receipt), lessons/{id}/rate, homework
@@ -69,7 +70,8 @@ app/
                  lessons/{id}/cancel|complete, strikes
     admin.py     /api/admin: stats, payments (+receipt, review), groups CRUD (+students add/remove,
                  +poster POST multipart / DELETE),
-                 tutors (+decision with comment, +documents/{doc_id} file), users (+block), violations, strikes
+                 tutors (+decision with comment, +documents/{doc_id} file), users (+block, +remove-teacher),
+                 violations, strikes
   static/
     index.html   shell only (appbar, #view, tabbar, #toasts)
     css/app.css  "Bright" design: tokens on :root, dark theme via [data-theme=dark] (synced with Telegram colorScheme)
@@ -125,6 +127,15 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
   (`tutor_no_documents`); rejection stores `User.tutor_review_note` (sent to the teacher). A rejected teacher who
   uploads new documents (`POST /api/tutor/documents`) goes back to `pending`. Teachers approved before this rule
   may have no documents; they stay approved.
+- **One account, both roles**: `role` is `student` | `tutor` | `admin`, and `role == "tutor"` exactly when the user
+  has a teacher profile (`tutor_status` pending / approved / rejected). Teachers may also study: student endpoints use
+  `require_learner` (student or tutor), the `/my` route accepts both, and teachers get both tabs (Teaching + My
+  learning). Nobody can enroll in a class they teach (`own_class`; catalog `my.own_class`). A student becomes a
+  teacher via `POST /api/auth/teacher-application` (same rules as teacher sign-up: subjects, bio ≥ 20, ≥ 1 certificate
+  → pending; their enrollments stay) from the Profile page. Admin "Remove teacher access"
+  (`POST /api/admin/users/{id}/remove-teacher`) turns a teacher back into a student (refused with `tutor_has_classes`
+  while they teach any class; documents are kept; they may apply again). The admin "Students" count = students +
+  teachers enrolled somewhere. Signing out never changes the role: the account is tied to the Telegram ID.
 - **Admins**: users in `ADMIN_TELEGRAM_IDS` are promoted at sign-in AND on their next authenticated request
   (`auth.get_current_user_optional`), so editing the env var + restarting is enough.
 - **Blocking** a user deletes their sessions; blocked users get 403 `account_blocked`.
