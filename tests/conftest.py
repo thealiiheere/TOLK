@@ -31,7 +31,15 @@ from app import activity, notify  # noqa: E402
 from app.database import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+def _tiny_png() -> bytes:
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (4, 4), (36, 64, 230)).save(out, "PNG")
+    return out.getvalue()
+
+
+PNG = _tiny_png()  # a real picture: certificates must open as a JPG / PNG
 
 
 def init_data(tg_id: int, first_name: str = "Test", lang: str = "en") -> str:

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as DbSession
 from app.config import settings
 from app.i18n import ApiError
 from app.models import Enrollment, Group, Lesson, LessonRating, TutorDocument, User, utcnow
-from app.uploads import CERTIFICATES, display_name, media_type, read_upload, write_upload
+from app.uploads import CERTIFICATES, display_name, is_photo, media_type, read_upload, write_upload
 
 MAX_STRIKES = 3
 MAX_DOCS_PER_UPLOAD = 5
@@ -119,7 +119,12 @@ async def add_tutor_documents(db: DbSession, tutor: User, files: list[UploadFile
         raise ApiError("certificates_required")
     if len(files) > MAX_DOCS_PER_UPLOAD or len(tutor.documents) + len(files) > MAX_DOCS_TOTAL:
         raise ApiError("too_many_documents", per_upload=MAX_DOCS_PER_UPLOAD, total=MAX_DOCS_TOTAL)
-    validated = [(f, *await read_upload(f, "certificates_required")) for f in files]
+    validated = []
+    for f in files:
+        data, ext = await read_upload(f, "certificates_required")
+        if not is_photo(data, ext):  # pictures only: no PDFs or other documents
+            raise ApiError("certificate_bad_type", name=display_name(f.filename))
+        validated.append((f, data, ext))
     docs = []
     for f, data, ext in validated:
         doc = TutorDocument(filename=write_upload(CERTIFICATES, data, ext), original_name=display_name(f.filename))

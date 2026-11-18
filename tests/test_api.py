@@ -341,6 +341,30 @@ def test_teacher_sign_up_requires_certificate(client):
     assert [d["name"] for d in t.get("/api/tutor/documents").json()] == ["diploma.png", "ielts.png"]
 
 
+def test_certificates_must_be_jpg_or_png_pictures(client):
+    jpg = io.BytesIO()
+    from PIL import Image
+
+    Image.new("RGB", (8, 8), (255, 122, 51)).save(jpg, "JPEG")
+    webp = io.BytesIO()
+    Image.new("RGB", (8, 8)).save(webp, "WEBP")
+    refused = {
+        "diploma.pdf": b"%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF",
+        "diploma.webp": webp.getvalue(),
+        "broken.png": b"\x89PNG\r\n\x1a\n" + b"\x00" * 64,  # PNG header, not a picture
+    }
+    for i, (name, data) in enumerate(refused.items()):
+        files = [("certificates", ("ok.png", io.BytesIO(PNG), "image/png")), ("certificates", (name, io.BytesIO(data), "application/octet-stream"))]
+        t, res = tutor_application(client, tg_id=2600 + i, files=files)
+        assert res.status_code == 400 and res.json()["code"] == "certificate_bad_type", name
+        assert name in res.json()["detail"]
+        assert t.get("/api/auth/me").json()["onboarded"] is False  # the good file wasn't kept either
+    t, res = tutor_application(client, tg_id=2610, files=[("certificates", ("diploma.jpg", io.BytesIO(jpg.getvalue()), "image/jpeg"))])
+    assert res.status_code == 200 and res.json()["tutor_status"] == "pending"
+    pdf = [("certificates", ("more.pdf", io.BytesIO(refused["diploma.pdf"]), "application/pdf"))]
+    assert t.post("/api/tutor/documents", files=pdf).json()["code"] == "certificate_bad_type"  # later uploads too
+
+
 def test_admin_reviews_documents_and_rejects_with_reason(client, fresh_db):
     sent = fresh_db
     admin = make_admin(client)

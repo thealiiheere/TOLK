@@ -109,7 +109,8 @@ export function paymentStatus(status) {
 
 // ---------- teacher certificates ----------
 export const MAX_CERTS_PER_UPLOAD = 5;
-const CERT_ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf';
+const CERT_ACCEPT = 'image/jpeg,image/png'; // pictures only (the server checks again)
+const isCertImage = (f) => /^image\/(jpeg|png)$/.test(f.type) || (!f.type && /\.(jpe?g|png)$/i.test(f.name));
 
 /** File picker for certificates / diplomas (multiple files). Lives inside a <form>; field name "certificates". */
 export function certificatesField() {
@@ -128,13 +129,17 @@ export function certificatesError(files) {
   const mb = state.config.max_upload_mb || 5;
   if (!files?.length) return t('certificates_required_ui');
   if (files.length > MAX_CERTS_PER_UPLOAD) return t('too_many_certs', { n: MAX_CERTS_PER_UPLOAD });
+  const bad = [...files].find((f) => !isCertImage(f));
+  if (bad) return t('certs_images_only', { name: bad.name });
   if ([...files].some((f) => f.size > mb * 1024 * 1024)) return t('file_too_large', { mb });
   return '';
 }
 
 on('certs-picked', (input) => {
   const list = input.closest('.file-drop').querySelector('[data-cert-list]');
-  mount(list, [...input.files].map((f) => html`<span>✓ ${f.name}</span>`));
+  mount(list, [...input.files].map((f) => (isCertImage(f)
+    ? html`<span>✓ ${f.name}</span>`
+    : html`<span style="color:var(--danger)">✕ ${f.name} — ${t('certs_not_image')}</span>`)));
 });
 
 /** List of uploaded documents. With `tutorId` (admin view) each item gets a "View" button. */

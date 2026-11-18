@@ -79,6 +79,19 @@ async def read_upload(file: UploadFile | None, missing_key: str) -> tuple[bytes,
     return data, ext
 
 
+def is_photo(data: bytes, ext: str) -> bool:
+    """A real JPG or PNG picture (certificates): the right magic bytes AND a file Pillow can read as that format."""
+    if ext not in (".jpg", ".png"):
+        return False
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            fmt = img.format
+            img.verify()
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+        return False
+    return fmt in ("JPEG", "PNG")
+
+
 def write_upload(kind: str, data: bytes, ext: str) -> str:
     name = f"{kind[:-1]}_{secrets.token_hex(12)}{ext}"
     (upload_dir(kind) / name).write_bytes(data)

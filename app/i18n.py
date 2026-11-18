@@ -223,9 +223,14 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": "The poster must be a JPG, PNG or WEBP image",
     },
     "certificates_required": {
-        "uz": "Kamida bitta sertifikat yoki diplom yuklang (JPG, PNG, WEBP yoki PDF)",
-        "ru": "Загрузите хотя бы один сертификат или диплом (JPG, PNG, WEBP или PDF)",
-        "en": "Upload at least one certificate or diploma (JPG, PNG, WEBP or PDF)",
+        "uz": "Kamida bitta sertifikat yoki diplom rasmini yuklang (JPG yoki PNG)",
+        "ru": "Загрузите хотя бы одно изображение сертификата или диплома (JPG или PNG)",
+        "en": "Upload at least one picture of a certificate or diploma (JPG or PNG)",
+    },
+    "certificate_bad_type": {
+        "uz": "«{name}»: sertifikat faqat JPG yoki PNG rasm bo'lishi mumkin. PDF bo'lsa, uni skrinshot yoki rasmga olib yuklang",
+        "ru": "«{name}»: сертификат принимается только как изображение JPG или PNG. Если у вас PDF, загрузите его скриншот или фото",
+        "en": "“{name}”: certificates must be JPG or PNG images. If yours is a PDF, upload a screenshot or photo of it",
     },
     "too_many_documents": {
         "uz": "Bir martada {per_upload} tagacha, jami {total} tagacha hujjat yuklash mumkin",

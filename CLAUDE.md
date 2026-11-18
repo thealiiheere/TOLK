@@ -130,7 +130,9 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
   (or has a record). Tutor rating = average of all their `LessonRating`s; drives catalog sort and `min_rating` filter.
 - **3-strike rule**: `Enrollment.strikes` (max 3). At 3, the student no longer receives lesson links and can't submit homework.
 - **Teacher sign-up / verification**: onboarding with role `tutor` requires subjects + bio ≥ 20 chars + **at least one
-  certificate** (JPG/PNG/WEBP/PDF, ≤ 5 per upload, ≤ 10 total) → `tutor_status="pending"`. Documents are private
+  certificate** (JPG/PNG pictures only — magic bytes + Pillow must read it, `services.add_tutor_documents` /
+  `uploads.is_photo`, else `certificate_bad_type`; ≤ 5 per upload, ≤ 10 total; older PDFs stay viewable)
+  → `tutor_status="pending"`. Documents are private
   (`TutorDocument`, `upload_dir/certificates`), only admins can open them. Admin **cannot approve without documents**
   (`tutor_no_documents`); rejection stores `User.tutor_review_note` (sent to the teacher). A rejected teacher who
   uploads new documents (`POST /api/tutor/documents`) goes back to `pending`. Teachers approved before this rule
