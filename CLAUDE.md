@@ -19,7 +19,7 @@ Roles: `student`, `tutor` (shown as "teacher" in the UI), `admin`. Production: A
 
 ```bash
 python run.py                         # migrate + (demo seed if DEMO_MODE) + uvicorn --reload on :8000 (PORT=... to change)
-python -m pytest                      # tests/ only (pytest.ini; signed initData, temp SQLite, cache off or FakeRedis; ~32 tests)
+python -m pytest                      # tests/ only (pytest.ini; signed initData, temp SQLite, cache off or FakeRedis; ~36 tests)
 python -m app.test_redis              # Redis connection test: run AS A MODULE from the project folder, exit 0 = OK
 python -m app.seed [--reset]          # demo data; --reset drops all tables (refused in production)
 alembic revision --autogenerate -m "msg"   # after changing app/models.py, then review the file
@@ -37,7 +37,7 @@ app/
   config.py      Settings (pydantic-settings, reads .env). All env vars live here. config_warnings() logged at startup.
   database.py    engine, SessionLocal, Base, get_db (SQLite pragmas: FK on, WAL)
   models.py      ORM: User, TutorDocument, Session, Group, Enrollment(table group_students), Payment, Lesson,
-                 LessonRecord, LessonRating, HomeworkSubmission
+                 LessonRecord, LessonRating, HomeworkSubmission, UserActivity (one row per user per UTC day)
   schemas.py     Pydantic request bodies + validators (meeting-link host allow-list, http URLs, language code,
                  course code format COURSE_CODE_RE)
   services.py    shared queries (tutor_ratings, enrolled_counts, notification recipients), course codes
@@ -51,6 +51,12 @@ app/
   cache.py       optional Redis cache (REDIS_URL): get_json / set_json / delete / cached(key, ttl, fn) / status.
                  Never raises: no URL or Redis down = miss. Keys prefixed "tolk:". Session events forget entries
                  after commits (see "Caching" in Domain rules).
+  activity.py    record(user_id) on every authenticated request (auth.get_current_user_optional): writes a
+                 UserActivity row at most once per user per day (in-memory note + insert … on conflict do nothing,
+                 own connection, never raises) → "active users"
+  analytics.py   admin overview numbers: period_bounds (calendar day/week/month/year in the admin's time zone from
+                 the browser's getTimezoneOffset), overview() = revenue / active users / new users / enrollments per
+                 period (one CASE column per period, one query per number), seats, recent payments
   ratelimit.py   Redis fixed-window limits (LIMITS): ratelimit.check(name, who) → 429 too_many_requests + Retry-After
   test_redis.py  `python -m app.test_redis`: ping + write/read/delete round trip, prints version and memory limit
   uploads.py     file storage under upload_dir: receipts/ + certificates/ (private, admin-only download) and posters/
@@ -68,7 +74,8 @@ app/
     student.py   /api/student: dashboard, enroll (multipart receipt), lessons/{id}/rate, homework
     tutor.py     /api/tutor: dashboard, documents (GET/POST multipart), groups/{id}/students, lessons (POST/PATCH),
                  lessons/{id}/cancel|complete, strikes
-    admin.py     /api/admin: stats, payments (+receipt, review), groups CRUD (+students add/remove,
+    admin.py     /api/admin: stats, overview (?period=day|week|month|year&back=N&tz=offset), lessons (?start&end,
+                 ≤ 45 days, calendar), payments (+receipt, review), groups CRUD (+students add/remove,
                  +poster POST multipart / DELETE),
                  tutors (+decision with comment, +documents/{doc_id} file), users (+block, +remove-teacher),
                  violations, strikes
@@ -76,14 +83,15 @@ app/
     index.html   shell only (appbar, #view, tabbar, #toasts)
     css/app.css  "Bright" design: tokens on :root, dark theme via [data-theme=dark] (synced with Telegram colorScheme)
     js/core.js   state, html`` templating (auto-escapes), api(), router, on() event delegation, sheets, toasts,
-                 formatting (price/date), avatar/stars/subjectInfo/subjectIcon/coverInner/codeBadge, icons, session helpers
+                 formatting (price/date/fmtCompact; Uzbek dates spelled out where Intl lacks uz data), avatar/stars/subjectInfo/subjectIcon/coverInner/codeBadge, icons, session helpers
     js/i18n.js   UI dictionary: key → [uz, ru, en]; t(key, {params}); language names for class subjects
     js/app.js    boot (Telegram init, theme, session restore), routes table, top bar + bottom tab bar
     js/pages/    explore.js (catalog+filters), class.js (class page, teacher page, enroll sheet),
                  account.js (login, onboarding, profile), student.js, tutor.js, admin.js,
                  components.js (class cards, reviews, lesson rows, certificatesField/certificatesError/documentList)
 alembic/versions/   0001_initial_schema, 0002_tutor_documents, 0003_course_code (data migration: backfills codes),
-                    0004_group_poster
+                    0004_group_poster, 0005_user_activity (data migration: backfills activity from sign-ups,
+                    sessions and payments)
 tests/              conftest.py (env, signed initData helper, Api client wrapper), test_api.py
 telegram_bot.py     long-polling bot: /start → welcome + Mini App button, sets menu button. Separate process.
 docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — NOT what production uses
@@ -136,6 +144,12 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
   (`POST /api/admin/users/{id}/remove-teacher`) turns a teacher back into a student (refused with `tutor_has_classes`
   while they teach any class; documents are kept; they may apply again). The admin "Students" count = students +
   teachers enrolled somewhere. Signing out never changes the role: the account is tied to the Telegram ID.
+- **Admin overview** (`#/admin`, pages/admin.js `overview`): period switch Day / Week / Month / Year + ‹ › (`back`),
+  four KPI cards (revenue = approved payments by `reviewed_at`, active users = distinct `UserActivity.seen_at`,
+  new users = `User.created_at`, new enrollments = `Enrollment.joined_at`) each vs the period before; the selected
+  card is the metric the bar chart shows (7 days / 8 weeks / 6 months / 5 years, click a bar = pick that period);
+  lesson calendar (one week, lessons of the chosen day; scheduled + ended = "Not completed"); seats filled ring +
+  platform totals; recent payments table. From 960 px the admin tabs are a sidebar (`.admin-shell` in app.css).
 - **Admins**: users in `ADMIN_TELEGRAM_IDS` are promoted at sign-in AND on their next authenticated request
   (`auth.get_current_user_optional`), so editing the env var + restarting is enough.
 - **Blocking** a user deletes their sessions; blocked users get 403 `account_blocked`.
@@ -145,10 +159,12 @@ docker-compose.yml  alternative Docker deployment (caddy + web + bot + db) — N
   nginx (`X-Forwarded-For $proxy_add_x_forwarded_for`), so a client-sent X-Forwarded-For can't fake it.
   New spam-prone endpoint → add a LIMITS entry and call `ratelimit.check(...)` first thing in the handler.
 - **Caching** (`app/cache.py`). Server (Redis): public catalog answers (`/api/catalog` filters, groups list per
-  filter combination, class page minus `my`, teacher page; 5 min) under a catalog version, and the admin overview
-  `/api/admin/stats` (one key, 60 s). Forgetting is automatic: SQLAlchemy session events note which models changed
+  filter combination, class page minus `my`, teacher page; 5 min) under a catalog version (`catalog_key`), and the
+  admin numbers (`/api/admin/stats`, `/api/admin/overview` per period/back/tz; 60 s) under an admin version
+  (`stats_key`). Forgetting is automatic: SQLAlchemy session events note which models changed
   (`_class_scopes`: Group / Enrollment / LessonRating / teacher Users → catalog + stats; Payment / Lesson / other
-  Users → stats) and after commit bump the catalog version / delete the stats key. Bulk `update()`/`delete()` are
+  Users → stats) and after commit bump the matching version. Activity marks (app/activity.py) skip the session
+  events on purpose, so "active users" catches up within the 60 s TTL. Bulk `update()`/`delete()` are
   caught too. A new model or a new cached answer that depends on other tables → extend `_class_scopes`. Never cache
   per-user data (dashboards, `my`, payments, sessions). Browser: `apiFresh()` (core.js) remembers catalog answers
   in memory (fresh 30 s, then shown at once and refreshed in the background); cleared by any non-GET `api()` call

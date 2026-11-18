@@ -243,10 +243,48 @@ export function fmtNumber(n) {
   return new Intl.NumberFormat('ru-RU').format(n || 0).replace(/,/g, ' ');
 }
 export function fmtPrice(n) { return `${fmtNumber(n)} ${t('currency')}`; }
+/** Short number for chart axes and small labels: 1,2 млн / 950K. */
+export function fmtCompact(n) {
+  try { return new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n || 0); } catch { return fmtNumber(n); }
+}
 export function periodLabel(p) { return t(`per_${p}`); }
 export function fmtDate(iso, opts = { day: 'numeric', month: 'short', year: 'numeric' }) {
   if (!iso) return '';
+  if (getLang() === 'uz' && !uzIntlWorks()) return fmtUz(new Date(iso), opts);
   try { return new Intl.DateTimeFormat(locale(), opts).format(new Date(iso)); } catch { return new Date(iso).toLocaleDateString(); }
+}
+
+// Chrome (and the webviews built on it) has no Uzbek month or weekday names and prints "2026 M11 18" / "Mon":
+// spell Uzbek dates out ourselves there. Browsers that do know Uzbek keep using Intl.
+const UZ_MONTHS = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentabr', 'oktabr', 'noyabr', 'dekabr'];
+const UZ_MONTHS_SHORT = ['yan', 'fev', 'mar', 'apr', 'may', 'iyn', 'iyl', 'avg', 'sen', 'okt', 'noy', 'dek'];
+const UZ_DAYS = ['yakshanba', 'dushanba', 'seshanba', 'chorshanba', 'payshanba', 'juma', 'shanba'];
+const UZ_DAYS_SHORT = ['Ya', 'Du', 'Se', 'Ch', 'Pa', 'Ju', 'Sh'];
+let uzIntl;
+function uzIntlWorks() {
+  if (uzIntl === undefined) {
+    try {
+      const f = (o) => new Intl.DateTimeFormat(LANG_LOCALES.uz, o).format(new Date(2026, 10, 2));
+      uzIntl = !/M\d/.test(f({ month: 'long' })) && f({ weekday: 'short' }) !== 'Mon';
+    } catch { uzIntl = false; }
+  }
+  return uzIntl;
+}
+/** The options fmtDate is called with, in Uzbek: "18-noyabr 2026", "Ch, 18-noy, 19:00", "16.11", "Du". */
+function fmtUz(d, o) {
+  const pad = (n) => String(n).padStart(2, '0');
+  let date = '';
+  if (o.month === 'numeric' || o.month === '2-digit') {
+    date = [o.day && pad(d.getDate()), pad(d.getMonth() + 1), o.year && d.getFullYear()].filter(Boolean).join('.');
+  } else if (o.month) {
+    const m = (o.month === 'long' ? UZ_MONTHS : UZ_MONTHS_SHORT)[d.getMonth()];
+    date = [o.day ? `${d.getDate()}-${m}` : m, o.year && d.getFullYear()].filter(Boolean).join(' ');
+  } else {
+    date = [o.day && d.getDate(), o.year && d.getFullYear()].filter(Boolean).join(' ');
+  }
+  const weekday = o.weekday ? (o.weekday === 'long' ? UZ_DAYS : UZ_DAYS_SHORT)[d.getDay()] : '';
+  const time = o.hour ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : '';
+  return [weekday, date, time].filter(Boolean).join(', ');
 }
 export function fmtTime(iso) { return fmtDate(iso, { hour: '2-digit', minute: '2-digit', hour12: false }); }
 export function fmtDateTime(iso) {
@@ -399,6 +437,12 @@ const ICONS = {
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  'chev-left': '<path d="m15 6-6 6 6 6"/>',
+  'chev-right': '<path d="m9 6 6 6-6 6"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  'trend-up': '<path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  'trend-down': '<path d="m3 7 6 6 4-4 8 8"/><path d="M15 17h6v-6"/>',
+  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
   star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',
   maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
   minimize: '<path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/>',

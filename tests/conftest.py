@@ -27,7 +27,7 @@ os.environ.update({
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import notify  # noqa: E402
+from app import activity, notify  # noqa: E402
 from app.database import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -51,6 +51,7 @@ def init_data(tg_id: int, first_name: str = "Test", lang: str = "en") -> str:
 def fresh_db(monkeypatch):
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    activity._recorded.clear()  # user ids repeat across tests
     sent = []
     monkeypatch.setattr(notify, "_send", lambda chat_id, text, lang: sent.append((chat_id, text)))
     yield sent

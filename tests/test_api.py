@@ -637,7 +637,7 @@ def test_admin_stats_are_cached_and_forgotten_after_changes(client, fake_redis):
     admin = make_admin(client)
     gid = make_group(admin, make_tutor(client, admin).user["id"])
     assert admin.get("/api/admin/stats").json()["pending_payments"] == 0
-    assert "tolk:admin:stats" in fake_redis.data
+    assert any(k.startswith("tolk:admin:v") and k.endswith(":stats") for k in fake_redis.data)
 
     student = make_student(client)
     res = student.post("/api/student/enroll", data={"group_id": gid}, files=receipt())
@@ -759,3 +759,74 @@ def test_admin_removes_teacher_access(client, fresh_db):
     assert _apply_to_teach(tutor).json()["tutor_status"] == "pending"  # may apply again
     student = make_student(client)
     assert admin.post(f"/api/admin/users/{student.user['id']}/remove-teacher").status_code == 404
+
+
+# ---------- admin overview ----------
+
+def test_period_bounds_follow_the_admins_calendar():
+    from datetime import datetime, timezone
+
+    from app.analytics import period_bounds
+
+    now = datetime(2026, 1, 2, 20, 30, tzinfo=timezone.utc)  # 3 Jan 01:30 in Tashkent (UTC+5, offset -300)
+    utc = lambda *a: datetime(*a, tzinfo=timezone.utc)  # noqa: E731
+    assert period_bounds("day", 0, -300, now) == (utc(2026, 1, 2, 19), utc(2026, 1, 3, 19))
+    assert period_bounds("day", 0, 0, now) == (utc(2026, 1, 2), utc(2026, 1, 3))  # still the 2nd in UTC
+    assert period_bounds("week", 0, -300, now) == (utc(2025, 12, 28, 19), utc(2026, 1, 4, 19))  # Monday 29 Dec
+    assert period_bounds("month", 1, -300, now) == (utc(2025, 11, 30, 19), utc(2025, 12, 31, 19))  # December
+    assert period_bounds("year", 0, -300, now) == (utc(2025, 12, 31, 19), utc(2026, 12, 31, 19))
+
+
+def test_admin_overview_numbers(client):
+    admin = make_admin(client)
+    tutor = make_tutor(client, admin)
+    gid = make_group(admin, tutor.user["id"])
+    student = make_student(client)
+    enroll_and_approve(admin, student, gid)
+    assert student.get("/api/admin/overview").status_code == 403
+
+    res = admin.get("/api/admin/overview", params={"period": "month", "tz": -300})
+    assert res.status_code == 200, res.text
+    o = res.json()
+    cur = o["current"]
+    assert cur["revenue"] == 300000 and cur["enrollments"] == 1 and cur["new_users"] == 3
+    assert cur["active_users"] == 3  # every signed-in request marks the user active for the day
+    assert o["previous"]["revenue"] == 0 and o["previous"]["back"] == 1
+    assert len(o["bars"]) == 6 and o["bars"][-1] == cur  # oldest -> newest, ends at the current month
+    assert o["seats"] == {"classes": 1, "total": 5, "taken": 1}
+    pay = o["recent_payments"][0]
+    assert pay["status"] == "approved" and pay["student"]["full_name"] == "Student One" and pay["group"]["id"] == gid
+
+    old = admin.get("/api/admin/overview", params={"period": "week", "back": 9}).json()
+    assert old["current"]["revenue"] == 0 and old["bars"][-1]["back"] == 9  # the chart follows a period off its row
+    assert admin.get("/api/admin/overview", params={"period": "hour"}).status_code == 422
+
+
+def test_activity_is_written_once_per_user_per_day(client):
+    from sqlalchemy import func, select
+
+    from app.models import UserActivity
+
+    student = make_student(client)
+    for _ in range(3):
+        assert student.get("/api/auth/me").status_code == 200
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(UserActivity).where(UserActivity.user_id == student.user["id"])) == 1
+
+
+def test_admin_lessons_calendar(client):
+    admin = make_admin(client)
+    tutor = make_tutor(client, admin)
+    gid = make_group(admin, tutor.user["id"])
+    lesson = tutor.post("/api/tutor/lessons", json={
+        "group_id": gid, "starts_at": SOON(days=1), "topic": "Intro", "meet_link": "https://meet.google.com/abc-defg-hij",
+    })
+    assert lesson.status_code == 200, lesson.text
+    week = {"start": SOON(hours=-1), "end": SOON(days=6)}
+    res = admin.get("/api/admin/lessons", params=week)
+    assert res.status_code == 200
+    [row] = res.json()
+    assert row["id"] == lesson.json()["id"] and row["group"]["id"] == gid and row["tutor"] == "Teacher One"
+    assert admin.get("/api/admin/lessons", params={"start": SOON(days=2), "end": SOON(days=6)}).json() == []
+    assert admin.get("/api/admin/lessons", params={"start": SOON(), "end": SOON(days=60)}).status_code == 422
+    assert tutor.get("/api/admin/lessons", params=week).status_code == 403

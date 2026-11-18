@@ -2,8 +2,8 @@
 
 Nothing breaks without Redis: when REDIS_URL is empty or Redis is down, reads are misses and writes are skipped,
 so callers never need a try/except. Values are stored as JSON under keys prefixed with "tolk:".
-Cached today: the public catalog (cached(catalog_key(...))) and the admin overview (STATS_KEY). Both are forgotten
-automatically after every committed database change that can affect them (session events at the bottom).
+Cached today: the public catalog (cached(catalog_key(...))) and the admin numbers (cached(stats_key(...))). Both are
+forgotten automatically after every committed database change that can affect them (session events at the bottom).
 Check the connection on a server: python -m app.test_redis
 """
 import hashlib
@@ -100,37 +100,54 @@ def cached(key: str, ttl: int, compute: Callable[[], Any]) -> Any:
 
 
 # ---------- what is cached, and when it is forgotten ----------
-# Public catalog answers (same for every visitor and language) live under a version number: any committed change
-# that can alter them bumps the version, so all old entries are ignored at once and expire on their own.
-# The admin overview is one key, deleted on any change to what it counts. TTLs are only a safety net
-# (time also changes "upcoming lessons" without any write).
+# Public catalog answers (same for every visitor and language) and the admin numbers (stats counters, the overview
+# per period) each live under a version number: any committed change that can alter them bumps the version, so all
+# old entries are ignored at once and expire on their own. TTLs are only a safety net (time also changes
+# "upcoming lessons", and activity marks from app/activity.py skip the session events).
 CATALOG_TTL = 300
 STATS_TTL = 60
-STATS_KEY = "admin:stats"
-_VERSION_KEY = "catalog:version"
+_CATALOG_VERSION = "catalog:version"
+_STATS_VERSION = "admin:version"
 
 
-def catalog_key(*parts: Any) -> str:
-    """Key for a catalog answer at the current catalog version; long parts (search text) are hashed."""
+def _versioned(namespace: str, version_key: str, parts: tuple) -> str:
     raw = "|".join("" if p is None else str(p) for p in parts)
-    if len(raw) > 80:
+    if len(raw) > 80:  # long parts (search text) are hashed
         raw = hashlib.sha1(raw.encode()).hexdigest()
     c = client()
     try:
-        version = (c.get(PREFIX + _VERSION_KEY) if c else None) or 0
+        version = (c.get(PREFIX + version_key) if c else None) or 0
     except redis.RedisError:
         version = 0
-    return f"catalog:v{version}:{raw}"
+    return f"{namespace}:v{version}:{raw}"
 
 
-def forget_catalog() -> None:
+def catalog_key(*parts: Any) -> str:
+    """Key for a catalog answer at the current catalog version."""
+    return _versioned("catalog", _CATALOG_VERSION, parts)
+
+
+def stats_key(*parts: Any) -> str:
+    """Key for an admin number (stats, overview) at the current admin version."""
+    return _versioned("admin", _STATS_VERSION, parts)
+
+
+def _bump(version_key: str) -> None:
     c = client()
     if c is None:
         return
     try:
-        c.incr(PREFIX + _VERSION_KEY)
+        c.incr(PREFIX + version_key)
     except redis.RedisError as e:
-        log.warning("catalog cache bump failed: %s", e)
+        log.warning("cache bump %s failed: %s", version_key, e)
+
+
+def forget_catalog() -> None:
+    _bump(_CATALOG_VERSION)
+
+
+def forget_stats() -> None:
+    _bump(_STATS_VERSION)
 
 
 def _class_scopes(cls: type) -> set[str]:
@@ -173,7 +190,7 @@ def _forget_changed(session):
     if "catalog" in touched:
         forget_catalog()
     if "stats" in touched:
-        delete(STATS_KEY)
+        forget_stats()
 
 
 @event.listens_for(SessionLocal, "after_rollback")

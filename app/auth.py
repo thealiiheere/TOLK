@@ -11,6 +11,7 @@ from fastapi import Depends, Request
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session as DbSession
 
+from app import activity
 from app.config import settings
 from app.database import get_db
 from app.i18n import ApiError
@@ -143,6 +144,8 @@ def get_current_user_optional(request: Request, db: DbSession = Depends(get_db))
         # ADMIN_TELEGRAM_IDS changed while this user was signed in: apply it now instead of at the next sign-in
         user.role, user.onboarded, user.tutor_status = "admin", True, None
         db.commit()
+    if not user.is_blocked:
+        activity.record(user.id)
     return user
 
 

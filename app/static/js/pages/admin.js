@@ -1,6 +1,7 @@
-// Admin panel: overview, payments (receipts), classes (create / edit / students), teachers, users, discipline.
+// Admin panel: overview (period numbers, chart, lesson calendar, latest payments), payments (receipts),
+// classes (create / edit / students), teachers, users, discipline.
 import {
-  api, avatar, busy, codeBadge, confirmSheet, empty, errorBox, fmtDate, fmtDateTime, fmtNumber, fmtPrice, fmtSchedule, formData, go, html, icon, loading,
+  api, avatar, busy, codeBadge, confirmSheet, empty, errorBox, fmtCompact, fmtDate, fmtDateTime, fmtNumber, fmtPrice, fmtSchedule, fmtTime, formData, go, html, icon, loading,
   mount, on, openSheet, periodLabel, ratingBadge, state, strikesDots, subjectIcon, subjectInfo, toast, toastError,
 } from '../core.js';
 import { LANGUAGE_CODES, subjectName, t } from '../i18n.js';
@@ -14,8 +15,9 @@ let receiptUrls = [];
 
 export async function render(view, params, query, alive) {
   const tab = TABS.includes(params.tab) ? params.tab : 'overview';
-  mount(view, html`<div class="container"><div class="page-head"><div><h1>${t('admin_panel')}</h1></div></div>
-    <nav class="tabs" id="admin-tabs">${tabs(tab)}</nav><div id="admin-body">${loading()}</div></div>`);
+  // Phones: title, pill tabs, page. From 960 px the tabs become a sidebar (app.css .admin-shell).
+  mount(view, html`<div class="container admin-shell"><div class="page-head"><div><h1>${t('admin_panel')}</h1></div></div>
+    <nav class="tabs admin-nav" id="admin-tabs">${tabs(tab)}</nav><div id="admin-body">${loading()}</div></div>`);
   try {
     stats = await api('/api/admin/stats');
     if (!alive()) return;
@@ -29,41 +31,334 @@ export async function render(view, params, query, alive) {
   }
 }
 
+const TAB_ICONS = { overview: 'level', payments: 'receipt', classes: 'book', teachers: 'board', users: 'users', discipline: 'shield' };
+
 function tabs(active) {
   const counts = { payments: stats.pending_payments, teachers: stats.pending_tutors, discipline: stats.violations };
-  return TABS.map((tab) => html`<a href="#/admin/${tab}" class="${tab === active ? 'active' : ''}">${t(`admin_${tab}`)}
+  return TABS.map((tab) => html`<a href="#/admin/${tab}" class="${tab === active ? 'active' : ''}">${icon(TAB_ICONS[tab])}<span>${t(`admin_${tab}`)}</span>
     ${counts[tab] ? html`<span class="count-dot">${counts[tab]}</span>` : ''}</a>`);
 }
 
 const reload = () => go(location.hash.slice(1));
 
 // ---------- overview ----------
+// Period numbers (KPI cards + chart) come from /api/admin/overview; the lesson calendar has its own week.
+// The choices live here, so they survive switching tabs.
+const PERIODS = ['day', 'week', 'month', 'year'];
+const METRICS = ['revenue', 'active_users', 'new_users', 'enrollments'];
+const ov = { period: 'month', back: 0, metric: 'revenue', data: null, day: null, lessons: null, seq: 0, calSeq: 0 };
+const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const mondayOf = (d) => addDays(startOfDay(d), -((d.getDay() + 6) % 7));
+const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+const ovAlive = () => document.getElementById('ov') !== null;
+
 async function overview(body) {
   const s = stats;
-  // money: the number stays whole and the currency drops below it when the tile is narrow (was cut to "995 000 …")
-  const money = (n) => html`<span>${fmtNumber(n)}</span> <small>${t('currency')}</small>`;
-  const tile = (v, k, href) => html`<a class="card stat" href="${href || '#/admin'}" style="color:inherit;text-decoration:none"><div class="v">${v}</div><div class="k">${k}</div></a>`;
+  ov.day = ov.day || startOfDay(new Date());
   mount(body, html`
-    <div class="stack-lg">
-      <div class="grid grid-stats">
-        ${tile(s.pending_payments, t('stat_pending_payments'), '#/admin/payments')}
-        ${tile(s.students, t('stat_students'), '#/admin/users')}
-        ${tile(s.tutors, t('stat_teachers'), '#/admin/teachers')}
-        ${tile(s.groups, t('stat_classes'), '#/admin/classes')}
-        ${tile(s.enrollments, t('stat_enrollments'), '#/admin/classes')}
-        ${tile(s.upcoming_lessons, t('stat_upcoming_lessons'))}
-        ${tile(money(s.revenue_month), t('stat_revenue_month'), '#/admin/payments?status=approved')}
-        ${tile(money(s.revenue_total), t('stat_revenue_total'), '#/admin/payments?status=approved')}
-        ${tile(s.avg_rating ? `${s.avg_rating.toFixed(2)} ★` : '—', t('stat_avg_rating'))}
-        ${tile(s.violations, t('stat_violations'), '#/admin/discipline')}
-      </div>
-      <div class="row-wrap">
+    <div class="ov" id="ov">
+      <div class="ov-actions">
         <button class="btn btn-primary" data-action="group-new">${icon('plus')} ${t('create_class')}</button>
-        <a class="btn btn-outline" href="#/admin/payments">${t('review_payments')}${s.pending_payments ? html` <span class="count-dot">${s.pending_payments}</span>` : ''}</a>
-        <a class="btn btn-outline" href="#/admin/teachers">${t('teacher_applications')}${s.pending_tutors ? html` <span class="count-dot">${s.pending_tutors}</span>` : ''}</a>
+        ${s.pending_payments ? html`<a class="btn btn-outline" href="#/admin/payments">${t('review_payments')} <span class="count-dot">${s.pending_payments}</span></a>` : ''}
+        ${s.pending_tutors ? html`<a class="btn btn-outline" href="#/admin/teachers">${t('teacher_applications')} <span class="count-dot">${s.pending_tutors}</span></a>` : ''}
+      </div>
+      <div class="ov-bar" id="ov-bar">${periodBar()}</div>
+      <div class="ov-kpis" id="ov-kpis">${ov.data ? kpis() : loading()}</div>
+      <div class="ov-grid">
+        <section class="card ov-chart" id="ov-chart">${ov.data ? chart() : ''}</section>
+        <section class="card ov-cal" id="ov-cal">${calendar()}</section>
+        <section class="card ov-pays" id="ov-pays">${ov.data ? recentPayments() : ''}</section>
+        <section class="card ov-side" id="ov-side">${ov.data ? side() : ''}</section>
       </div>
     </div>`);
+  await Promise.all([loadNumbers(), loadLessons()]);
 }
+
+async function loadNumbers() {
+  const seq = ++ov.seq;
+  document.getElementById('ov')?.classList.add('refreshing'); // keep the old numbers on screen, dimmed
+  const bar = document.getElementById('ov-bar');
+  if (bar) mount(bar, periodBar());
+  try {
+    const data = await api('/api/admin/overview', { query: { period: ov.period, back: ov.back, tz: new Date().getTimezoneOffset() } });
+    if (seq !== ov.seq || !ovAlive()) return;
+    ov.data = data;
+    drawNumbers();
+  } catch (err) {
+    if (seq === ov.seq && ovAlive()) toastError(err);
+  } finally {
+    if (seq === ov.seq) document.getElementById('ov')?.classList.remove('refreshing');
+  }
+}
+
+function drawNumbers() {
+  mount(document.getElementById('ov-bar'), periodBar());
+  mount(document.getElementById('ov-kpis'), kpis());
+  mount(document.getElementById('ov-chart'), chart());
+  mount(document.getElementById('ov-pays'), recentPayments());
+  mount(document.getElementById('ov-side'), side());
+}
+
+/** "18 Nov 2026" / "16 – 22 Nov 2026" / "November 2026" / "2026" for a period that starts at `start`. */
+function rangeLabel(period, start, end) {
+  if (period === 'day') return fmtDate(start, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  if (period === 'week') return daySpan(start, end);
+  if (period === 'month') return fmtDate(start, { month: 'long', year: 'numeric' });
+  return fmtDate(start, { year: 'numeric' });
+}
+
+/** "16 – 22 Nov 2026", "28 Sept – 22 Nov 2026" for [start, end). */
+function daySpan(start, end) {
+  const a = new Date(start);
+  const b = new Date(new Date(end) - 1);
+  const tail = fmtDate(b, { day: 'numeric', month: 'short', year: 'numeric' });
+  if (a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()) return `${a.getDate()} – ${tail}`;
+  return `${fmtDate(a, { day: 'numeric', month: 'short' })} – ${tail}`;
+}
+
+/** What the chart covers, e.g. "Jun – Nov 2026", "2022 – 2026". */
+function chartSpan(period, bars) {
+  const first = bars[0].start;
+  const last = bars[bars.length - 1];
+  if (period === 'month') return `${fmtDate(first, { month: 'short', year: 'numeric' })} – ${fmtDate(last.start, { month: 'short', year: 'numeric' })}`;
+  if (period === 'year') return `${fmtDate(first, { year: 'numeric' })} – ${fmtDate(last.start, { year: 'numeric' })}`;
+  return daySpan(first, last.end);
+}
+
+/** Short label under a chart bar. */
+function barLabel(period, start) {
+  if (period === 'day') return fmtDate(start, { weekday: 'short' });
+  if (period === 'week') return fmtDate(start, { day: 'numeric', month: 'numeric' });
+  if (period === 'month') return fmtDate(start, { month: 'short' });
+  return fmtDate(start, { year: 'numeric' });
+}
+
+function periodBar() {
+  // The label is only shown once the numbers for this exact choice have arrived.
+  const d = ov.data;
+  const cur = d && d.period === ov.period && d.back === ov.back ? d.current : null;
+  return html`
+    <div class="seg ov-periods" role="group">${PERIODS.map((p) => html`
+      <button class="${p === ov.period ? 'active' : ''}" data-action="ov-period" data-period="${p}" aria-pressed="${p === ov.period}">${t(`period_${p}`)}</button>`)}</div>
+    <div class="ov-range">
+      <button class="btn btn-outline btn-icon" data-action="ov-step" data-step="1" aria-label="${t('prev_period')}">${icon('chev-left')}</button>
+      <button class="ov-range-label" data-action="ov-now" ${ov.back ? '' : 'disabled'} title="${ov.back ? t('back_to_now') : ''}">${icon('calendar')}
+        <span>${cur ? rangeLabel(ov.period, cur.start, cur.end) : '…'}</span></button>
+      <button class="btn btn-outline btn-icon" data-action="ov-step" data-step="-1" aria-label="${t('next_period')}" ${ov.back ? '' : 'disabled'}>${icon('chev-right')}</button>
+    </div>`;
+}
+
+const money = (n) => html`<span>${fmtNumber(n)}</span> <small>${t('currency')}</small>`;
+
+function delta(metric) {
+  const cur = ov.data.current[metric];
+  const prev = ov.data.previous[metric];
+  const diff = cur - prev;
+  const vs = html`<span class="vs">${t(`vs_prev_${ov.period}`)}</span>`;
+  if (!diff) return html`<div class="ov-delta"><span class="delta flat">${t('no_change')}</span> ${vs}</div>`;
+  const up = diff > 0;
+  // Percent when there is a base to compare with; otherwise the plain difference ("+3").
+  const size = prev ? `${Math.round((Math.abs(diff) / prev) * 1000) / 10}%` : metric === 'revenue' ? fmtCompact(Math.abs(diff)) : fmtNumber(Math.abs(diff));
+  return html`<div class="ov-delta"><span class="delta ${up ? 'up' : 'down'}">${icon(up ? 'trend-up' : 'trend-down')}${up ? '+' : '−'}${size}</span> ${vs}</div>`;
+}
+
+function kpis() {
+  // Phones: one "compared with last week" line under the cards instead of the same words on every card.
+  const note = html`<p class="ov-vs-note tiny muted">${t(`cmp_prev_${ov.period}`)}</p>`;
+  return [...METRICS.map((m) => {
+    const v = ov.data.current[m];
+    return html`<button class="card ov-kpi ${m === ov.metric ? 'on' : ''}" data-action="ov-metric" data-metric="${m}" aria-pressed="${m === ov.metric}"
+      title="${m === 'active_users' ? t('kpi_active_users_hint') : ''}">
+      <span class="k">${t(`kpi_${m}`)}</span>
+      <span class="v">${m === 'revenue' ? money(v) : fmtNumber(v)}</span>
+      ${delta(m)}
+    </button>`;
+  }), note];
+}
+
+/** Round axis top and step: 0 / 250K / 500K / 750K / 1M. Nothing to show: just the zero line. */
+function axis(max) {
+  if (!max) return { top: 1, step: 1 };
+  const rough = max / 4;
+  const mag = 10 ** Math.floor(Math.log10(rough));
+  const step = Math.max(1, [1, 2, 2.5, 5, 10].map((f) => f * mag).find((x) => x >= rough));
+  return { top: Math.ceil(max / step) * step, step };
+}
+
+function chart() {
+  const { bars, back } = ov.data;
+  const m = ov.metric;
+  const values = bars.map((b) => b[m]);
+  const { top, step } = axis(Math.max(...values));
+  const ticks = [];
+  for (let v = 0; v <= top + step / 2; v += step) ticks.push(v);
+  if (!values.some(Boolean)) ticks.splice(1);
+  const fmt = (v) => (m === 'revenue' ? fmtCompact(v) : fmtNumber(v));
+  const full = (v) => (m === 'revenue' ? fmtPrice(v) : fmtNumber(v));
+  return html`
+    <div class="card-head"><div><h3>${t(`kpi_${m}`)}</h3>
+      <div class="tiny muted">${chartSpan(ov.period, bars)}</div></div></div>
+    <div class="ov-plot" style="--ticks:${Math.max(1, ticks.length - 1)}">
+      <div class="ov-ticks" aria-hidden="true">${ticks.slice().reverse().map((v) => html`<span>${fmt(v)}</span>`)}</div>
+      <div class="ov-bars ${bars.length > 7 ? 'dense' : ''}">${bars.map((b) => {
+        const sel = b.back === back;
+        const label = rangeLabel(ov.period, b.start, b.end);
+        return html`<button class="ov-col ${sel ? 'sel' : ''}" data-action="ov-pick" data-back="${b.back}" aria-pressed="${sel}"
+            aria-label="${label}: ${full(b[m])}">
+          <span class="ov-track"><span class="ov-fill" style="height:${(b[m] / top) * 100}%">
+            ${sel && b[m] ? html`<span class="ov-val">${fmt(b[m])}</span>` : ''}</span></span>
+          <span class="ov-x">${barLabel(ov.period, b.start)}</span>
+          <span class="ov-tip" aria-hidden="true">${label}<b>${full(b[m])}</b></span>
+        </button>`;
+      })}</div>
+      ${values.some(Boolean) ? '' : html`<div class="ov-empty tiny muted">${t('chart_empty')}</div>`}
+    </div>`;
+}
+
+function calendar() {
+  const monday = mondayOf(ov.day);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+  const today = startOfDay(new Date());
+  const list = ov.lessons;
+  const onDay = (d) => (list || []).filter((x) => sameDay(new Date(x.starts_at), d));
+  const chosen = onDay(ov.day);
+  const now = Date.now();
+  const badge = (x) => {
+    const ended = new Date(x.starts_at).getTime() + (x.duration_min || 60) * 60000 < now;
+    const st = x.status === 'scheduled' && ended ? 'unmarked' : x.status;
+    const tone = { scheduled: 'primary', completed: 'success', cancelled: 'danger', unmarked: 'warning' }[st];
+    return html`<span class="badge badge-${tone}">${t(`lesson_st_${st}`)}</span>`;
+  };
+  return html`
+    <div class="card-head ov-cal-head">
+      <button class="btn btn-ghost btn-icon" data-action="ov-week" data-step="-7" aria-label="${t('prev_week')}">${icon('chev-left')}</button>
+      <div class="ov-cal-title"><h3>${fmtDate(ov.day, { month: 'long', year: 'numeric' })}</h3><span class="tiny muted">${t('ov_lessons')}</span></div>
+      <button class="btn btn-ghost btn-icon" data-action="ov-week" data-step="7" aria-label="${t('next_week')}">${icon('chev-right')}</button>
+    </div>
+    <div class="ov-week">${days.map((d, i) => {
+      const n = onDay(d).length;
+      return html`<button class="ov-day ${sameDay(d, ov.day) ? 'sel' : ''} ${sameDay(d, today) ? 'today' : ''}" data-action="ov-day" data-i="${i}"
+          aria-pressed="${sameDay(d, ov.day)}" aria-label="${fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long' })}${n ? ` · ${t('n_lessons', { n })}` : ''}">
+        <span class="wd">${fmtDate(d, { weekday: 'short' })}</span><span class="dn">${d.getDate()}</span>
+        <span class="dots" aria-hidden="true">${Array.from({ length: Math.min(n, 3) }, () => html`<i></i>`)}</span>
+      </button>`;
+    })}</div>
+    <div class="ov-day-list">${list === null ? loading() : chosen.length ? chosen.map((x) => html`
+      <a class="ov-lesson" href="#/class/${x.group.id}">
+        <span class="time">${fmtTime(x.starts_at)}<small>${t('minutes', { n: x.duration_min })}</small></span>
+        <span class="grow" style="min-width:0"><span class="title">${codeBadge(x.group.code)} ${x.group.title}</span>
+          <span class="tiny muted">${x.tutor || '—'}${x.topic ? ` · ${x.topic}` : ''}</span></span>
+        ${badge(x)}
+      </a>`) : html`<div class="ov-none small muted">${t('no_lessons_day')}</div>`}</div>`;
+}
+
+async function loadLessons() {
+  const seq = ++ov.calSeq;
+  const monday = mondayOf(ov.day);
+  try {
+    const list = await api('/api/admin/lessons', { query: { start: monday.toISOString(), end: addDays(monday, 7).toISOString() } });
+    if (seq !== ov.calSeq || !ovAlive()) return;
+    ov.lessons = list;
+    mount(document.getElementById('ov-cal'), calendar());
+  } catch (err) {
+    if (seq === ov.calSeq && ovAlive()) toastError(err);
+  }
+}
+
+function side() {
+  const s = stats;
+  const { taken, total, classes } = ov.data.seats;
+  const pct = total ? Math.min(100, Math.round((taken / total) * 100)) : 0;
+  const C = 2 * Math.PI * 26; // ring circumference (r = 26)
+  const row = (k, v, href, extra = '') => html`<a class="ov-total" href="${href}"><span class="k">${k}</span><span class="v">${v}${extra}</span></a>`;
+  return html`
+    <div class="ov-seats">
+      <svg class="ov-ring" viewBox="0 0 64 64" role="img" aria-label="${t('seats_filled')}: ${pct}%">
+        <circle cx="32" cy="32" r="26" class="track"/>
+        ${pct ? html`<circle cx="32" cy="32" r="26" class="fill" stroke-dasharray="${(C * pct) / 100} ${C}"/>` : ''}
+        <text x="32" y="36.5" text-anchor="middle">${pct}%</text>
+      </svg>
+      <div><div class="bold">${t('seats_filled')}</div>
+        <div class="small muted">${t('seats_detail', { taken, total, n: classes })}</div></div>
+    </div>
+    <div class="ov-totals">
+      <div class="tiny muted bold ov-totals-h">${t('ov_platform')}</div>
+      ${row(t('stat_students'), fmtNumber(s.students), '#/admin/users')}
+      ${row(t('stat_teachers'), fmtNumber(s.tutors), '#/admin/teachers', s.pending_tutors ? html`<span class="badge badge-warning">${t('n_pending', { n: s.pending_tutors })}</span>` : '')}
+      ${row(t('stat_classes'), fmtNumber(s.groups), '#/admin/classes')}
+      ${row(t('stat_upcoming_lessons'), fmtNumber(s.upcoming_lessons), '#/admin/classes')}
+      ${row(t('stat_avg_rating'), s.avg_rating ? `${s.avg_rating.toFixed(2)} ★` : '—', '#/admin/teachers')}
+      ${row(t('stat_revenue_total'), fmtPrice(s.revenue_total), '#/admin/payments?status=approved')}
+    </div>`;
+}
+
+function recentPayments() {
+  const list = ov.data.recent_payments;
+  const thumb = (g) => {
+    if (!g) return html`<span class="ov-thumb tone-none" aria-hidden="true">🧾</span>`;
+    const info = subjectInfo(g);
+    return html`<span class="ov-thumb tone-${info.tone}" aria-hidden="true">${g.poster_url
+      ? html`<img src="${g.poster_url}" alt="" loading="lazy">` : html`<span class="mark">${info.code || info.emoji}</span>`}</span>`;
+  };
+  return html`
+    <div class="card-head"><h3>${t('recent_payments')}</h3>
+      <div class="row" style="gap:6px">
+        <button class="btn btn-ghost btn-icon" data-action="ov-refresh" aria-label="${t('refresh')}" title="${t('refresh')}">${icon('refresh')}</button>
+        <a class="btn btn-ghost btn-sm" href="#/admin/payments?status=all">${t('see_all')}</a>
+      </div></div>
+    ${list.length ? html`<div class="ov-pay-table" role="table">
+      <div class="ov-pay-row ov-pay-head" role="row">
+        <span role="columnheader">${t('col_class')}</span><span role="columnheader">${t('col_student')}</span>
+        <span role="columnheader">ID</span><span role="columnheader">${t('col_amount')}</span><span role="columnheader">${t('col_status')}</span></div>
+      ${list.map((p) => html`<a class="ov-pay-row" role="row" href="#/admin/payments?status=${p.status}">
+        <span class="c-class" role="cell">${thumb(p.group)}<span class="name">${p.group ? p.group.title : t('class_deleted')}
+          <span class="tiny muted ov-phone">${p.student.full_name} · #${p.student.id}</span></span></span>
+        <span class="c-student" role="cell">${p.student.full_name}</span>
+        <span class="c-id muted" role="cell">#${p.student.id}</span>
+        <span class="c-amount bold" role="cell">${fmtPrice(p.amount)}</span>
+        <span class="c-status" role="cell">${paymentStatus(p.status)}</span>
+      </a>`)}</div>` : html`<div class="card-body">${empty('🧾', t('no_payments'))}</div>`}`;
+}
+
+on('ov-period', (el) => {
+  if (ov.period === el.dataset.period) return;
+  ov.period = el.dataset.period;
+  ov.back = 0;
+  loadNumbers();
+});
+on('ov-step', (el) => {
+  ov.back = Math.max(0, ov.back + Number(el.dataset.step));
+  loadNumbers();
+});
+on('ov-now', () => { ov.back = 0; loadNumbers(); });
+on('ov-pick', (el) => {
+  const back = Number(el.dataset.back);
+  if (back === ov.back) return;
+  ov.back = back;
+  loadNumbers();
+});
+on('ov-metric', (el) => {
+  ov.metric = el.dataset.metric;
+  mount(document.getElementById('ov-kpis'), kpis());
+  mount(document.getElementById('ov-chart'), chart());
+});
+on('ov-refresh', async (el) => {
+  await busy(el, async () => {
+    stats = await api('/api/admin/stats').catch(() => stats);
+    await loadNumbers();
+  });
+});
+on('ov-day', (el) => {
+  ov.day = addDays(mondayOf(ov.day), Number(el.dataset.i));
+  mount(document.getElementById('ov-cal'), calendar());
+});
+on('ov-week', (el) => {
+  ov.day = addDays(ov.day, Number(el.dataset.step));
+  ov.lessons = null;
+  mount(document.getElementById('ov-cal'), calendar());
+  loadLessons();
+});
 
 // ---------- payments ----------
 async function payments(body, query, alive) {

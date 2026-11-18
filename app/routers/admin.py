@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile
@@ -5,7 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from app import cache
+from app import analytics, cache
 from app.auth import require_admin
 from app.database import get_db
 from app.i18n import ApiError
@@ -14,7 +15,7 @@ from app.notify import notify
 from app.routers.tutor import apply_strike
 from app.schemas import AssignStudentIn, BlockIn, GroupIn, PaymentReviewIn, StrikeIn, TutorDecisionIn
 from app.services import (
-    MAX_STRIKES, document_dict, enrolled_counts, ensure_course_code_free, generate_course_code, group_card, iso,
+    MAX_STRIKES, aware, document_dict, enrolled_counts, ensure_course_code_free, generate_course_code, group_card, iso,
     tutor_card, tutor_ratings, user_brief,
 )
 from app.uploads import (
@@ -50,7 +51,7 @@ def _enroll(db: DbSession, group: Group, student: User) -> None:
 @router.get("/stats")
 def stats(_: User = Depends(require_admin), db: DbSession = Depends(get_db)):
     # Cached for everyone with admin access; forgotten after any change it counts (see app/cache.py)
-    return cache.cached(cache.STATS_KEY, cache.STATS_TTL, lambda: _stats(db))
+    return cache.cached(cache.stats_key("stats"), cache.STATS_TTL, lambda: _stats(db))
 
 
 def _stats(db: DbSession) -> dict:
@@ -76,6 +77,43 @@ def _stats(db: DbSession) -> dict:
         "revenue_total": count(select(func.sum(Payment.amount)).where(Payment.status == "approved")),
         "avg_rating": round(float(avg), 2) if avg is not None else None,
     }
+
+
+@router.get("/overview")
+def overview(
+    period: Literal["day", "week", "month", "year"] = "month",
+    back: int = Query(0, ge=0, le=999),
+    tz: int = Query(0, ge=-840, le=840),
+    _: User = Depends(require_admin),
+    db: DbSession = Depends(get_db),
+):
+    """Revenue, active / new users and enrollments for a calendar period in the admin's time zone (`tz` =
+    the browser's getTimezoneOffset()), with the period before it, the chart row, seats and the latest payments."""
+    return cache.cached(
+        cache.stats_key("overview", period, back, tz), cache.STATS_TTL, lambda: analytics.overview(db, period, back, tz),
+    )
+
+
+@router.get("/lessons")
+def lessons_between(
+    start: datetime, end: datetime, _: User = Depends(require_admin), db: DbSession = Depends(get_db),
+):
+    """Every lesson starting in [start, end) (at most 45 days), for the overview calendar."""
+    start, end = aware(start), aware(end)
+    if not timedelta(0) < end - start <= timedelta(days=45):
+        raise ApiError("validation_error", 422)
+    lessons = db.scalars(
+        select(Lesson).options(selectinload(Lesson.group), selectinload(Lesson.tutor))
+        .where(Lesson.starts_at >= start, Lesson.starts_at < end).order_by(Lesson.starts_at).limit(500)
+    ).all()
+    return [
+        {
+            "id": x.id, "starts_at": iso(x.starts_at), "duration_min": x.duration_min, "status": x.status,
+            "topic": x.topic, "group": {"id": x.group.id, "code": x.group.code, "title": x.group.title},
+            "tutor": x.tutor.full_name if x.tutor else None,
+        }
+        for x in lessons
+    ]
 
 
 # ---------- payments ----------

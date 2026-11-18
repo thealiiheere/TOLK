@@ -1,8 +1,8 @@
 """SQLAlchemy ORM models. Schema changes need an Alembic migration (see CLAUDE.md)."""
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func,
+    BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -201,3 +201,15 @@ class HomeworkSubmission(Base):
     comment: Mapped[str] = mapped_column(String(500), default="")
     status: Mapped[str] = mapped_column(String(16), default="submitted")
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserActivity(Base):
+    """One row per user per UTC day they used the app (written by app/activity.py on their first request that day).
+
+    `seen_at` is that first request. Drives "active users" on the admin overview.
+    """
+    __tablename__ = "user_activity"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
